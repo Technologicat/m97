@@ -36,6 +36,9 @@ def build(hub):
     async def index(client):
         ui.page_title(f"m97 · {socket.gethostname()}")
         dark = ui.dark_mode(True)
+        # Quasar marks a disabled button only by fading it to 70 % opacity, which beside an enabled one reads as a
+        # slightly different shade of the same button. Grey it out instead.
+        ui.add_css(".q-btn.disabled { opacity: 0.3 !important; filter: grayscale(1); }")
 
         # The viewer's choice of dark or light is kept in their browser, which may refuse storage (a private
         # window, blocked site data); then the page simply opens dark.
