@@ -4,6 +4,8 @@ A web dashboard and control panel for a [gufo](https://github.com/gufo-org/gufo)
 Halo: what the machine and the model are doing (power, temperatures, memory, GPU load, generation speed,
 recent requests), and buttons to start and stop the services.
 
+For my stance on AI contributions, see the [collaboration guidelines](https://github.com/Technologicat/substrate-independent/blob/main/collaboration.md).
+
 **Status: being built.** The design is in [`briefs/dashboard.md`](briefs/dashboard.md).
 
 ## License
