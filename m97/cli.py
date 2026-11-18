@@ -1,33 +1,92 @@
-"""The `m97` command: run the dashboard."""
+"""The `m97` command: run the dashboard, or manage it as a systemd user service.
+
+    m97 serve [--lan]          run in the foreground (what the service runs)
+    m97 install [--local]      install and enable the service, so m97 starts at boot; serves the network
+    m97 uninstall              disable and remove the service
+    m97 start | stop           start or stop the service
+    m97 status                 running or not, and the URL
+    m97 logs [-f]              the service's log
+"""
 
 import argparse
 import logging
+import pathlib
 import socket
+import subprocess
 import sys
+import time
 
 from . import __version__, settings as settings_module
 
-__all__ = ["main"]
+__all__ = ["UNIT_NAME", "unit_path", "unit_file", "url_line", "main"]
+
+UNIT_NAME = "m97.service"
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(prog="m97", description="A web dashboard and control panel for a gufo server.")
-    parser.add_argument("--lan", action="store_true",
-                        help="listen on all interfaces, so the page is reachable from the network "
-                             "(default: this machine only)")
-    parser.add_argument("--settings", default=str(settings_module.USER_SETTINGS),
-                        help="the user settings file (default: %(default)s)")
-    parser.add_argument("--version", action="version", version=f"m97 {__version__}")
-    args = parser.parse_args(argv)
+def unit_path():
+    """Where the systemd user unit goes."""
+    return pathlib.Path("~/.config/systemd/user", UNIT_NAME).expanduser()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+def unit_file(*, python, lan, settings_path=None):
+    """The text of the systemd user unit that runs `python -m m97 serve`.
+
+    `python` is the interpreter to run (the one m97 is installed in), `lan` whether to serve the network,
+    `settings_path` a settings file other than the default, or `None`.
+    """
+    args = [str(python), "-m", "m97", "serve"]
+    if lan:
+        args.append("--lan")
+    if settings_path is not None:
+        args += ["--settings", str(settings_path)]
+    return f"""[Unit]
+Description=m97, a dashboard and control panel for the gufo LLM server
+
+[Service]
+ExecStart={" ".join(_quote(a) for a in args)}
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=m97
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def _quote(arg):
+    # systemd splits ExecStart= like a shell would, double quotes included.
+    return f'"{arg}"' if any(c.isspace() for c in arg) else arg
+
+
+def url_line(port, scope):
+    """The line saying where m97 can be reached, given `services.listen_scope`'s answer for its port."""
+    if scope == "all":
+        return f"  http://{socket.gethostname()}:{port}  (all interfaces)"
+    if scope == "local":
+        return f"  http://127.0.0.1:{port}  (this machine only)"
+    return f"  nothing is listening on port {port} yet"
+
+
+def _systemctl(*args, check=True):
+    return subprocess.run(["systemctl", "--user", *args], check=check)
+
+
+def _load_settings(path):
     try:
-        settings = settings_module.load(args.settings)
+        return settings_module.load(path)
     except settings_module.SettingsError as exc:
-        print(f"m97: {exc}", file=sys.stderr)
-        return 2
+        sys.exit(f"m97: {exc}")
 
-    # Imported here so that `m97 --help` and a settings error stay fast.
+
+# --------------------------------------------------------------------------------
+# The verbs
+
+def serve(args):
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    settings = _load_settings(args.settings)
+
+    # Imported here so that the other verbs, `--help` and a settings error stay fast.
     from nicegui import ui
 
     from .app import build
@@ -46,6 +105,126 @@ def main(argv=None):
            binding_refresh_interval=None,
            show_welcome_message=False)
     return 0
+
+
+def _wait_until_listening(args, timeout=10.0):
+    """Give a just-started service a moment to open its port, so `status` can show the URL."""
+    from .services import listen_scope
+
+    port = _load_settings(args.settings)["server"]["port"]
+    deadline = time.monotonic() + timeout
+    while listen_scope(port) is None and time.monotonic() < deadline:
+        time.sleep(0.5)
+
+
+def install(args):
+    _load_settings(args.settings)   # refuse to install a service that would fail on its settings at once
+    settings_path = None if args.settings == str(settings_module.USER_SETTINGS) else pathlib.Path(args.settings).resolve()
+    path = unit_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(unit_file(python=sys.executable, lan=not args.local, settings_path=settings_path))
+    _systemctl("daemon-reload")
+    _systemctl("enable", UNIT_NAME)
+    _systemctl("restart", UNIT_NAME)   # not `enable --now`, which leaves a running service on the old unit
+    print(f"m97: installed {path}, enabled at boot and started")
+    _wait_until_listening(args)
+    return status(args)
+
+
+def uninstall(args):
+    path = unit_path()
+    if not path.exists():
+        print("m97: not installed")
+        return 0
+    _systemctl("disable", "--now", UNIT_NAME, check=False)
+    path.unlink()
+    _systemctl("daemon-reload")
+    print(f"m97: stopped, disabled and removed {path}")
+    return 0
+
+
+def _require_installed():
+    if not unit_path().exists():
+        sys.exit("m97: the service is not installed; 'm97 install' first, or run 'm97 serve' in the foreground")
+
+
+def start(args):
+    _require_installed()
+    _systemctl("start", UNIT_NAME)
+    _wait_until_listening(args)
+    return status(args)
+
+
+def stop(args):
+    _require_installed()
+    _systemctl("stop", UNIT_NAME)
+    print("m97: stopped")
+    return 0
+
+
+def status(args):
+    from .services import listen_scope
+
+    port = _load_settings(args.settings)["server"]["port"]
+    if not unit_path().exists():
+        scope = listen_scope(port)
+        print("m97: the service is not installed" + ("; something is serving on its port:" if scope else ""))
+        if scope:
+            print(url_line(port, scope))
+        return 0
+    active = subprocess.run(["systemctl", "--user", "is-active", UNIT_NAME],
+                            capture_output=True, text=True).stdout.strip()
+    enabled = subprocess.run(["systemctl", "--user", "is-enabled", UNIT_NAME],
+                             capture_output=True, text=True).stdout.strip()
+    at_boot = "starts at boot" if enabled == "enabled" else "does not start at boot"
+    print(f"m97: {'running' if active == 'active' else active} ({at_boot})")
+    if active in ("active", "activating"):
+        print(url_line(port, listen_scope(port)))
+    return 0
+
+
+def logs(args):
+    return subprocess.run(["journalctl", "--user", "-u", UNIT_NAME, *(["-f"] if args.follow else [])]).returncode
+
+
+# --------------------------------------------------------------------------------
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="m97", description="A web dashboard and control panel for a gufo server.",
+                                     epilog=__doc__.split("\n\n", 1)[1], formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", action="version", version=f"m97 {__version__}")
+    parser.add_argument("--settings", default=str(settings_module.USER_SETTINGS),
+                        help="the user settings file (default: %(default)s)")
+    verbs = parser.add_subparsers(dest="verb", metavar="VERB")
+
+    p = verbs.add_parser("serve", help="run in the foreground")
+    p.add_argument("--lan", action="store_true",
+                   help="listen on all interfaces, so the page is reachable from the network (default: this machine only)")
+    p.set_defaults(run=serve)
+
+    p = verbs.add_parser("install", help="install and enable the systemd user service, serving the network")
+    p.add_argument("--local", action="store_true", help="serve this machine only")
+    p.set_defaults(run=install)
+
+    for name, run, text in (("uninstall", uninstall, "disable and remove the service"),
+                            ("start", start, "start the service"),
+                            ("stop", stop, "stop the service"),
+                            ("status", status, "running or not, and the URL")):
+        verbs.add_parser(name, help=text).set_defaults(run=run)
+
+    p = verbs.add_parser("logs", help="the service's log")
+    p.add_argument("-f", "--follow", action="store_true", help="keep following it")
+    p.set_defaults(run=logs)
+
+    args = parser.parse_args(argv)
+    if args.verb is None:
+        parser.print_help()
+        return 2
+    try:
+        return args.run(args)
+    except subprocess.CalledProcessError as exc:
+        print(f"m97: {' '.join(exc.cmd)} failed (exit {exc.returncode})", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
