@@ -103,11 +103,43 @@ All readable without root.
 - **Starts at boot without a login**: a systemd user service, with lingering enabled (it is, on the AI
   server). A wrapper with the same verbs as `gufo-serve` would match the existing tools.
 
-## Open, for the session to decide with the maintainer
+## Decided in the first session (Juha, 2026-11-18)
 
-- How to recognize a trusted network, and the config file's format.
-- How much history to keep, and whether it survives a restart of the dashboard (it need not, at first).
-- Whether to depend on dotclaude's scripts or carry its own copies of the sampler and the container handling.
+- **NiceGUI.** The prototype (a start/stop button for gufo, status updating live through a ~35 s start)
+  worked on NiceGUI 4.0.0 under Python 3.14, at about 0.2 % of one core with a tab open and gufo up.
+- **Trusted network = the active NetworkManager connection's UUID**, with an optional subnet check on top.
+  NM activates a saved Wi-Fi profile only when the SSID matches and the WPA handshake succeeds, so a network
+  borrowing the name does not match. A bare SSID can be borrowed, and a subnet says little: the travel
+  network's 192.168.1.0/24 is a common router default. Checked at each button press, so a network change
+  while m97 runs is picked up. Gap: a wired profile matches any cable; when wired networking is used, the
+  gateway's MAC address is the identifier to add.
+- **Config: TOML, with overrides.** Defaults ship in the package as `settings.toml`; the user's
+  `~/.config/m97/settings.toml` overrides them key by key (tables merge, other values replace whole, arrays
+  included). A key with no default is reported as a probable typo. The PIN and the trusted networks live
+  only in the user's file.
+- **No PIN configured** → off the trusted networks the buttons stay locked, with a message beside them (or a
+  tooltip) saying why and what to configure to enable them.
+- **gufo is started with `--lan` only on a trusted network**; elsewhere it stays on `127.0.0.1`, whoever
+  presses the button.
+- **m97 runs the containers itself**, rather than calling dotclaude's wrappers: those hardcode one machine's
+  model, and other gufo users most likely have a bare `podman run` line rather than scripts. Everything
+  machine-specific comes from the config: for gufo the image, models directory, model, MTP model, served
+  name, sessions, context, port and extra arguments; for Open WebUI the image, volume, port and gufo URL.
+  The awkward cases the wrappers handle carry over (a leftover container in another state, a container
+  dying during load, the startup wait on the monotonic clock).
+- **The sensor sampler is vendored** from `powerlog.py`, returning `None` for a missing sensor instead of
+  exiting.
+- **Container state from `podman events`**, not polling: one `inspect` at startup, then follow the event
+  stream (journald-backed here); if the stream process exits, restart it and inspect again, since events in
+  the gap are lost. gufo's readiness, slots and metrics come over loopback HTTP, only while its container
+  runs. So m97 spawns no periodic processes.
+- **Shared state**: one sampling loop in the server; each open tab only renders from it. Service state is
+  derived from observation, so a start from the CLI shows too and every viewer sees the same "starting";
+  only a failed start's error is m97's own memory.
+- **History**: an in-memory ring buffer of about ten minutes, not kept across a restart.
+- **PIN over plain HTTP**: accepted for v1, with wrong guesses rate-limited; the README says so.
+- **Port 8097.**
+- **`pdm.lock` committed** (an app).
 
 ## Testing
 
