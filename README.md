@@ -1,6 +1,7 @@
 # m97
 
 ![CI status](https://img.shields.io/github/actions/workflow/status/Technologicat/m97/ci.yml?branch=main)
+[![codecov](https://codecov.io/gh/Technologicat/m97/branch/main/graph/badge.svg)](https://codecov.io/gh/Technologicat/m97)
 ![license](https://img.shields.io/github/license/Technologicat/m97)
 
 A web dashboard and control panel for a [gufo](https://github.com/gufo-org/gufo) LLM server on AMD Strix
