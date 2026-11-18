@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import pathlib
+import shutil
 import tempfile
 import time
 import urllib.error
@@ -132,6 +133,17 @@ async def run(*args, timeout=60):
         return proc.returncode, out.read().decode(errors="replace"), err.read().decode(errors="replace")
 
 
+def _in_own_scope(*args):
+    """`args`, run in a transient systemd scope of their own when systemd-run is available.
+
+    podman leaves the container's monitor (conmon) in the cgroup of whoever ran `podman run`. Run from the
+    m97 service, that is the service's cgroup, and stopping or restarting m97 would stop the containers too.
+    """
+    if shutil.which("systemd-run") is None:
+        return list(args)
+    return ["systemd-run", "--user", "--scope", "--quiet", "--collect", *args]
+
+
 def _kill(proc):
     try:
         proc.kill()
@@ -173,7 +185,7 @@ async def start(service, *, lan, run=run, ready=None, clock=time.monotonic, poll
     if state is not None:
         logger.info(f"{service.container}: removing a leftover container (state: {state})")
         await _remove(service.container, run=run)
-    code, _, err = await run("podman", "run", *service.run_args(lan))
+    code, _, err = await run(*_in_own_scope("podman", "run", *service.run_args(lan)))
     if code != 0:
         return f"podman could not start {service.title}: {err.strip()}"
     t0 = clock()

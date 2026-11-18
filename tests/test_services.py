@@ -52,6 +52,7 @@ def make_podman(state=None, *, dies=False, run_fails=False):
     box = {"state": state, "calls": []}
 
     async def run(*args, timeout=60):
+        args = args[args.index("podman"):]           # past any systemd-run prefix
         box["calls"].append(args[1])
         verb = args[1]
         if verb == "container":                                      # inspect
@@ -206,3 +207,18 @@ def test_run_returns_when_the_command_exits_even_if_a_child_keeps_its_output_ope
 def test_run_times_out():
     code, _, err = asyncio.run(run("sleep", "5", timeout=0.2))
     assert code == 124 and "timed out" in err
+
+
+def test_podman_run_goes_in_a_scope_of_its_own(monkeypatch):
+    # Otherwise conmon stays in m97's cgroup, and restarting m97 kills the containers.
+    seen = []
+    box, fake = make_podman()
+
+    async def run(*args, timeout=60):
+        seen.append(args)
+        return await fake(*args, timeout=timeout)
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    asyncio.run(start(SERVICE, lan=False, run=run, ready=ready_after(0), clock=fake_clock(), poll=0))
+    podman_run = next(a for a in seen if "run" in a and "podman" in a and a[a.index("podman") + 1] == "run")
+    assert podman_run[:3] == ("systemd-run", "--user", "--scope")
