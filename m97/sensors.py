@@ -1,0 +1,137 @@
+"""Host sensors on an AMD APU: power, temperatures, GPU load and clock, CPU load, RAM and GTT.
+
+Reads sysfs and procfs only, so it needs no root. The hwmon sensors are found by driver name, since hwmon
+indices are not stable across boots. A sensor that is missing, or that fails to read, comes back as `None`,
+so the page shows a blank rather than the sampler failing.
+"""
+
+import pathlib
+
+__all__ = ["find_hwmon",
+           "parse_proc_stat", "parse_meminfo",
+           "make_sampler"]
+
+
+def find_hwmon(name, *, root="/"):
+    """Return the hwmon directory whose `name` file says `name`, or `None`."""
+    for d in sorted(pathlib.Path(root, "sys/class/hwmon").glob("hwmon*")):
+        try:
+            if (d / "name").read_text().strip() == name:
+                return d
+        except OSError:
+            continue
+    return None
+
+
+def _read_int(path):
+    if path is None:
+        return None
+    try:
+        return int(pathlib.Path(path).read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _scale(value, divisor):
+    return None if value is None else value / divisor
+
+
+def parse_proc_stat(text):
+    """Return `(busy, total)` jiffies from the aggregate `cpu` line of /proc/stat, or `None`.
+
+    Busy is everything except idle and iowait. Guest time is already counted in user and nice, so it is
+    left out of the total rather than counted twice.
+    """
+    for line in text.splitlines():
+        fields = line.split()
+        if fields and fields[0] == "cpu":
+            try:
+                values = [int(v) for v in fields[1:9]]  # user nice system idle iowait irq softirq steal
+            except ValueError:
+                return None
+            if len(values) < 4:
+                return None
+            total = sum(values)
+            idle = values[3] + (values[4] if len(values) > 4 else 0)
+            return total - idle, total
+    return None
+
+
+def parse_meminfo(text):
+    """Return `{key: bytes}` for the `kB` lines of /proc/meminfo."""
+    info = {}
+    for line in text.splitlines():
+        key, _, rest = line.partition(":")
+        fields = rest.split()
+        if len(fields) == 2 and fields[1] == "kB":
+            try:
+                info[key] = int(fields[0]) * 1024
+            except ValueError:
+                continue
+    return info
+
+
+def make_sampler(*, root="/"):
+    """Locate the sensors once, and return a function that takes one sample as a dict.
+
+    The keys: `ppt_w` (socket power), `cpu_temp_c` (Tctl), `gpu_temp_c` (edge), `gpu_busy_pct`, `gpu_mhz`,
+    `cpu_busy_pct`, `load1`, `ram_used_gib`, `ram_total_gib`, `gtt_used_gib`, `gtt_total_gib`. Any of them
+    may be `None`. `cpu_busy_pct` is the share of CPU time spent busy since the previous sample, so the first
+    sample has `None` there.
+
+    `root` relocates every path, for testing against a fake tree.
+    """
+    root = pathlib.Path(root)
+    amdgpu = find_hwmon("amdgpu", root=root)
+    k10temp = find_hwmon("k10temp", root=root)
+    # The DRM device behind the amdgpu hwmon holds gpu_busy_percent and the GTT counters.
+    device = (amdgpu / "device") if amdgpu is not None else None
+    proc = root / "proc"
+
+    def at(base, name):
+        return None if base is None else base / name
+
+    previous = None  # (busy, total) jiffies at the last sample
+
+    def cpu_busy_pct():
+        nonlocal previous
+        try:
+            maybe_now = parse_proc_stat((proc / "stat").read_text())
+        except OSError:
+            maybe_now = None
+        if maybe_now is None:
+            return None
+        before, previous = previous, maybe_now
+        if before is None or maybe_now[1] <= before[1]:
+            return None
+        return 100.0 * (maybe_now[0] - before[0]) / (maybe_now[1] - before[1])
+
+    def load1():
+        try:
+            return float((proc / "loadavg").read_text().split()[0])
+        except (OSError, ValueError, IndexError):
+            return None
+
+    def sample():
+        try:
+            meminfo = parse_meminfo((proc / "meminfo").read_text())
+        except OSError:
+            meminfo = {}
+        ram_total = meminfo.get("MemTotal")
+        ram_available = meminfo.get("MemAvailable")
+        return {
+            "ppt_w": _scale(_read_int(at(amdgpu, "power1_input")), 1e6),        # µW
+            "cpu_temp_c": _scale(_read_int(at(k10temp, "temp1_input")), 1e3),   # m°C
+            "gpu_temp_c": _scale(_read_int(at(amdgpu, "temp1_input")), 1e3),
+            "gpu_busy_pct": _read_int(at(device, "gpu_busy_percent")),
+            "gpu_mhz": _scale(_read_int(at(amdgpu, "freq1_input")), 1e6),       # Hz
+            "cpu_busy_pct": cpu_busy_pct(),
+            "load1": load1(),
+            "ram_used_gib": (_scale(ram_total - ram_available, 2**30)
+                             if ram_total is not None and ram_available is not None else None),
+            "ram_total_gib": _scale(ram_total, 2**30),
+            "gtt_used_gib": _scale(_read_int(at(device, "mem_info_gtt_used")), 2**30),
+            "gtt_total_gib": _scale(_read_int(at(device, "mem_info_gtt_total")), 2**30),
+        }
+
+    return sample
