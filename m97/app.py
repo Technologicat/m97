@@ -33,16 +33,22 @@ def build(hub):
     """Register the page, reading everything it shows from `hub`."""
 
     @ui.page("/")
-    def index(client):
+    async def index(client):
         ui.page_title(f"m97 · {socket.gethostname()}")
         dark = ui.dark_mode(True)
+
+        # The viewer's choice of dark or light is kept in their browser, which may refuse storage (a private
+        # window, blocked site data); then the page simply opens dark.
+        def toggle_dark():
+            dark.set_value(not dark.value)
+            ui.run_javascript(f"try {{ localStorage.setItem('m97-dark', '{'1' if dark.value else '0'}') }} catch (e) {{}}")
         unlocked = {"by_pin": False}   # per page: a right PIN opens the buttons until the page is reloaded
 
         with ui.header().classes("items-center justify-between px-4 py-2"):
             ui.label(f"m97 · {socket.gethostname()}").classes("text-lg font-medium")
             with ui.row().classes("items-center gap-2"):
                 clock_label = ui.label().classes("text-sm opacity-80")
-                ui.button(icon="contrast", on_click=lambda: dark.set_value(not dark.value)).props(
+                ui.button(icon="contrast", on_click=toggle_dark).props(
                     "flat round dense color=white").tooltip("Dark or light")
 
         with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
@@ -57,12 +63,16 @@ def build(hub):
                         badge = ui.badge("…")
                         spinner = ui.spinner(size="1.2em")
                         detail = ui.label().classes("text-sm opacity-70")
+                        address = ui.link(new_tab=True).classes("text-sm font-mono")
+                        address_plain = ui.label().classes("text-sm font-mono opacity-80")
+                        scope = ui.label().classes("text-sm opacity-70")
                         ui.space()
                         start_button = ui.button("Start", on_click=lambda k=key: act(k, "start")).props("unelevated")
                         stop_button = ui.button("Stop", on_click=lambda k=key: act(k, "stop"),
                                                 color="negative").props("outline")
                     error = ui.label().classes("text-sm text-negative whitespace-pre-wrap")
-                    rows[key] = (badge, spinner, detail, start_button, stop_button, error)
+                    rows[key] = (badge, spinner, detail, (address, address_plain, scope), start_button, stop_button,
+                                 error)
                 with ui.row().classes("w-full items-center gap-3"):
                     lock_note = ui.label().classes("text-sm opacity-70")
                     pin_input = ui.input("PIN", password=True).props("dense outlined").classes("w-32")
@@ -144,13 +154,23 @@ def build(hub):
             clock_label.text = datetime.datetime.now().strftime("%H:%M:%S")
             usable = refresh_access()
 
-            for key, (badge, spinner, detail, start_button, stop_button, error) in rows.items():
+            for key, (badge, spinner, detail, (address, address_plain, scope), start_button, stop_button,
+                      error) in rows.items():
                 status = hub.status(key)
                 badge.text = status
                 badge.props(f"color={STATUS_COLORS[status]}")
                 spinner.visible = status in ("starting", "stopping")
                 state = hub.container[key]
                 detail.text = f"container: {state}" if state not in (None, "running") else ""
+                service, where = hub.services[key], hub.scope[key]
+                host = socket.gethostname() if where == "all" else "127.0.0.1"
+                url = f"http://{host}:{service.port}{service.url_path}" if where else ""
+                address.text = url
+                address.props(f'href="{url}"')
+                address.visible = bool(url) and service.browsable
+                address_plain.text = url
+                address_plain.visible = bool(url) and not service.browsable
+                scope.text = {"all": "all interfaces", "local": "this machine only"}.get(where, "")
                 # Stop stays available while starting: it cancels the start and removes the container.
                 start_button.enabled = usable and status == "stopped"
                 stop_button.enabled = usable and status in ("running", "starting")
@@ -229,6 +249,14 @@ def build(hub):
 
         refresh()
         ui.timer(hub.interval, refresh)
+
+        await client.connected()
+        try:
+            stored = await ui.run_javascript("try { return localStorage.getItem('m97-dark') } catch (e) { return null }")
+        except TimeoutError:
+            stored = None
+        if stored in ("0", "1"):
+            dark.set_value(stored == "1")
 
     app.on_startup(hub.start)
     app.on_shutdown(hub.stop)

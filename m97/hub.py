@@ -51,6 +51,7 @@ class Hub:
 
         self.container = {key: None for key in self.services}   # container state per service
         self.ready = {key: False for key in self.services}
+        self.scope = {key: None for key in self.services}       # "all", "local" or None: where it listens
         self.action = {key: None for key in self.services}      # "start" / "stop" while m97 runs one
         self.error = {key: "" for key in self.services}         # why the last start or stop failed
         self._action_tasks = {}                                  # key -> the asyncio task of its action
@@ -211,6 +212,8 @@ class Hub:
         now = time.monotonic()
         self.latest = await asyncio.to_thread(self._sample)
         for key, service in self.services.items():
+            self.scope[key] = (await asyncio.to_thread(services.listen_scope, service.port)
+                               if self.container[key] == "running" else None)
             if self.container[key] == "running":
                 if key == "gufo":
                     await self._poll_gufo(now)

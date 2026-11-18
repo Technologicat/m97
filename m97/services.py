@@ -18,7 +18,8 @@ __all__ = ["Service", "gufo_service", "openwebui_service",
            "gufo_run_args", "openwebui_run_args",
            "run", "container_state", "answers", "start", "stop",
            "follow_events", "EVENT_STATES",
-           "derive_status"]
+           "derive_status",
+           "listen_scope", "parse_proc_net_tcp"]
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,9 @@ class Service:
     """One service: how to run its container, and how to tell it is ready.
 
     `run_args(lan)` returns the arguments to `podman run`, with the service listening on all interfaces if
-    `lan` is true. `ready_url` answers 200 once the service is up. `start_timeout` is in seconds.
+    `lan` is true. `ready_url` answers 200 once the service is up. `start_timeout` is in seconds. `port` and
+    `url_path` make the address shown to people (`/v1` for an API base); `browsable` says whether that address
+    is a page worth opening in a browser.
     """
     key: str
     title: str
@@ -39,6 +42,9 @@ class Service:
     run_args: object       # callable: lan -> list of str
     ready_url: str
     start_timeout: float
+    port: int
+    url_path: str = ""
+    browsable: bool = False
 
 
 # --------------------------------------------------------------------------------
@@ -87,7 +93,7 @@ def gufo_service(settings):
                    run_args=lambda lan: gufo_run_args(gufo, lan=lan, devices=devices,
                                                       uid=os.getuid(), gid=os.getgid()),
                    ready_url=f"http://127.0.0.1:{gufo['port']}/ready",
-                   start_timeout=gufo["start_timeout"])
+                   start_timeout=gufo["start_timeout"], port=gufo["port"], url_path="/v1")
 
 
 def openwebui_service(settings):
@@ -96,7 +102,7 @@ def openwebui_service(settings):
     return Service(key="openwebui", title="Open WebUI", container=openwebui["container"],
                    run_args=lambda lan: openwebui_run_args(openwebui, settings["gufo"], lan=lan),
                    ready_url=f"http://127.0.0.1:{openwebui['port']}/health",
-                   start_timeout=openwebui["start_timeout"])
+                   start_timeout=openwebui["start_timeout"], port=openwebui["port"], browsable=True)
 
 
 # --------------------------------------------------------------------------------
@@ -246,3 +252,46 @@ def derive_status(*, container, ready, action):
     if container == "running":
         return "running" if ready else "starting"
     return "stopped"
+
+
+# --------------------------------------------------------------------------------
+# Where a service listens
+
+_TCP_LISTEN = "0A"
+_ANY = {"00000000", "0" * 32}                                   # 0.0.0.0, ::
+_LOOPBACK = {"0100007F", "00000000000000000000000001000000"}   # 127.0.0.1, ::1 (as the kernel prints them)
+
+
+def parse_proc_net_tcp(text, port):
+    """The local addresses (kernel hex) listening on `port` in a /proc/net/tcp or tcp6 table."""
+    addresses = []
+    for line in text.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) < 4 or fields[3] != _TCP_LISTEN:
+            continue
+        address, _, hex_port = fields[1].partition(":")
+        try:
+            if int(hex_port, 16) == port:
+                addresses.append(address)
+        except ValueError:
+            continue
+    return addresses
+
+
+def listen_scope(port, *, root="/"):
+    """Whether something listens on TCP `port`: `"all"` (all interfaces), `"local"` (loopback only), or `None`.
+
+    Read from the kernel's socket tables, so it holds whoever started the service. The containers run with
+    `--network host`, so their sockets are in the host's tables.
+    """
+    addresses = []
+    for table in ("tcp", "tcp6"):
+        try:
+            addresses += parse_proc_net_tcp(pathlib.Path(root, "proc/net", table).read_text(), port)
+        except OSError:
+            continue
+    if any(a in _ANY for a in addresses):
+        return "all"
+    if addresses:
+        return "local" if all(a in _LOOPBACK for a in addresses) else "all"
+    return None

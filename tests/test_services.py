@@ -3,7 +3,8 @@ import pathlib
 
 import pytest
 
-from m97.services import (Service, derive_status, gufo_run_args, openwebui_run_args, start, stop)
+from m97.services import (Service, derive_status, gufo_run_args, listen_scope, openwebui_run_args,
+                          parse_proc_net_tcp, start, stop)
 from m97.settings import load
 
 SETTINGS = load(pathlib.Path("/nonexistent/settings.toml"))   # the shipped defaults
@@ -75,7 +76,7 @@ def make_podman(state=None, *, dies=False, run_fails=False):
 
 
 SERVICE = Service(key="gufo", title="gufo", container="gufo", run_args=lambda lan: ["-d", "--name", "gufo", "img"],
-                  ready_url="http://127.0.0.1:1/ready", start_timeout=10)
+                  ready_url="http://127.0.0.1:1/ready", start_timeout=10, port=1)
 
 
 def fake_clock():
@@ -162,3 +163,29 @@ def test_stop_when_absent_does_nothing():
 ])
 def test_derive_status(container, ready, action, expected):
     assert derive_status(container=container, ready=ready, action=action) == expected
+
+
+# --------------------------------------------------------------------------------
+# Where a service listens
+
+TCP = """  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:0277 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1
+   1: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 2
+   2: 0100007F:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 3
+   3: 3A32A8C0:1F90 1F32A8C0:D2F0 01 00000000:00000000 00:00000000 00000000  1000        0 4
+"""
+
+
+def test_parse_proc_net_tcp():
+    assert parse_proc_net_tcp(TCP, 8080) == ["00000000"]       # the established connection is not listening
+    assert parse_proc_net_tcp(TCP, 3000) == ["0100007F"]
+    assert parse_proc_net_tcp(TCP, 9999) == []
+
+
+def test_listen_scope(tmp_path):
+    (tmp_path / "proc/net").mkdir(parents=True)
+    (tmp_path / "proc/net/tcp").write_text(TCP)
+    assert listen_scope(8080, root=tmp_path) == "all"
+    assert listen_scope(3000, root=str(tmp_path)) == "local"
+    assert listen_scope(9999, root=tmp_path) is None
+    assert listen_scope(8080, root=tmp_path / "nowhere") is None
