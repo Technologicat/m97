@@ -9,6 +9,7 @@ import pathlib
 
 __all__ = ["find_hwmon",
            "parse_proc_stat", "parse_meminfo",
+           "cpu_cores",
            "make_sampler"]
 
 
@@ -80,6 +81,20 @@ def parse_meminfo(text):
     return info
 
 
+def cpu_cores(*, root="/"):
+    """The hardware threads grouped by physical core: a list of cores, each a sorted list of CPU numbers.
+
+    Threads share a core when their sysfs `topology` gives the same package, die and core ID. Cores are
+    ordered by their lowest CPU number. A CPU whose core ID cannot be read counts as a core of its own.
+    """
+    cores = {}
+    for d in pathlib.Path(root, "sys/devices/system/cpu").glob("cpu[0-9]*"):
+        cpu = int(d.name[3:])
+        ids = tuple(_read_int(d / "topology" / name) for name in ("physical_package_id", "die_id", "core_id"))
+        cores.setdefault(ids if ids[2] is not None else ("alone", cpu), []).append(cpu)
+    return sorted((sorted(threads) for threads in cores.values()), key=min)
+
+
 def make_sampler(*, root="/"):
     """Locate the sensors once, and return a function that takes one sample as a dict.
 
@@ -87,7 +102,7 @@ def make_sampler(*, root="/"):
     `cpu_busy_pct`, `cpu_thread_pct`, `load1`, `ram_used_gib`, `ram_total_gib`, `gtt_used_gib`,
     `gtt_total_gib`. Any of them may be `None`. `cpu_busy_pct` is the share of CPU time spent busy since the
     previous sample, so the first sample has `None` there; `cpu_thread_pct` is the same per hardware thread,
-    a list in CPU number order, with `None` for a thread that has no figure.
+    a dict from CPU number to percentage, `None` for a thread that has no figure.
 
     `root` relocates every path, for testing against a fake tree.
     """
@@ -111,9 +126,9 @@ def make_sampler(*, root="/"):
         except OSError:
             now = {}
         before, previous = previous, now
-        threads = sorted((int(name[3:]) for name in now if name[3:].isdigit()))
-        per_thread = [_busy_pct(before.get(f"cpu{n}"), now[f"cpu{n}"]) for n in threads]
-        return _busy_pct(before.get("cpu"), now.get("cpu")), (per_thread if threads else None)
+        per_thread = {int(name[3:]): _busy_pct(before.get(name), stat)
+                      for name, stat in now.items() if name[3:].isdigit()}
+        return _busy_pct(before.get("cpu"), now.get("cpu")), (per_thread or None)
 
     def load1():
         try:

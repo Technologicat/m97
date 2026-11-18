@@ -2,7 +2,7 @@ import pathlib
 
 import pytest
 
-from m97.sensors import make_sampler, parse_meminfo, parse_proc_stat
+from m97.sensors import cpu_cores, make_sampler, parse_meminfo, parse_proc_stat
 
 STAT_1 = "cpu  100 0 50 800 50 0 0 0 0 0\ncpu0 1 2 3 4 5 6 7 8 9 10\n"
 STAT_2 = "cpu  160 0 70 900 70 0 0 0 0 0\n"   # +80 busy of +200 total
@@ -72,9 +72,22 @@ def test_sample(tree, as_type):
 def test_per_thread(tree):
     write(tree / "proc/stat", "cpu  0 0 0 0 0 0 0 0\ncpu1 0 0 0 100 0 0 0 0\ncpu0 0 0 0 100 0 0 0 0\n")
     sample = make_sampler(root=tree)
-    assert sample()["cpu_thread_pct"] == [None, None]
+    assert sample()["cpu_thread_pct"] == {0: None, 1: None}
     write(tree / "proc/stat", "cpu  0 0 0 0 0 0 0 0\ncpu1 50 0 0 150 0 0 0 0\ncpu0 25 0 0 175 0 0 0 0\n")
-    assert sample()["cpu_thread_pct"] == [pytest.approx(25.0), pytest.approx(50.0)], "in CPU number order"
+    assert sample()["cpu_thread_pct"] == {0: pytest.approx(25.0), 1: pytest.approx(50.0)}
+
+
+def test_cpu_cores_group_siblings_whatever_the_numbering(tmp_path):
+    # Siblings adjacent (0,1 and 2,3), core IDs not in CPU order, two packages, and one CPU with no topology.
+    topology = {0: (0, 0, 4), 1: (0, 0, 4), 2: (0, 0, 0), 3: (0, 0, 0), 4: (1, 0, 4), 5: None}
+    for cpu, ids in topology.items():
+        d = tmp_path / f"sys/devices/system/cpu/cpu{cpu}/topology"
+        d.mkdir(parents=True)
+        if ids is not None:
+            for name, value in zip(("physical_package_id", "die_id", "core_id"), ids):
+                (d / name).write_text(f"{value}\n")
+    (tmp_path / "sys/devices/system/cpu/cpufreq").mkdir()      # not a CPU
+    assert cpu_cores(root=tmp_path) == [[0, 1], [2, 3], [4], [5]]
 
 
 def test_missing_sensors_give_none(tmp_path):

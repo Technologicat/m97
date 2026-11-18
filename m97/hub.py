@@ -43,6 +43,7 @@ class Hub:
         self.services = {s.key: s for s in (services.gufo_service(settings), services.openwebui_service(settings))}
         self._by_container = {s.container: s.key for s in self.services.values()}
         self._sample = sensors.make_sampler()
+        self.cpu_cores = sensors.cpu_cores()   # CPU numbers grouped by physical core
 
         interval = settings["history"]["interval"]
         self.interval = interval
