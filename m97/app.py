@@ -10,7 +10,12 @@ from . import access
 
 __all__ = ["build"]
 
-STATUS_COLORS = {"running": "positive", "starting": "warning", "stopping": "warning", "stopped": "grey"}
+# Badge (background, text) per status, chosen for contrast: white on green-700 is 5.0:1, black on amber
+# 12:1, white on grey-700 6.2:1 (WCAG AA asks 4.5:1 for small text).
+STATUS_COLORS = {"running": ("#15803d", "#ffffff"),
+                 "starting": ("#f2c037", "#000000"),
+                 "stopping": ("#f2c037", "#000000"),
+                 "stopped": ("#616161", "#ffffff")}
 
 
 def _fmt(value, spec, unit=""):
@@ -39,6 +44,10 @@ def build(hub):
         # Quasar marks a disabled button only by fading it to 70 % opacity, which beside an enabled one reads as a
         # slightly different shade of the same button. Grey it out instead.
         ui.add_css(".q-btn.disabled { opacity: 0.3 !important; filter: grayscale(1); }")
+        # Quasar's red (#c10015) is 2.6:1 on the dark background; red-400 is 6.1:1 there, though too light on
+        # white. Its variable reaches the Stop buttons and the error text alike. `!important` because Quasar
+        # sets the variable as an inline style on <body>, which an ordinary rule cannot override.
+        ui.add_css(".body--dark { --q-negative: #f87171 !important; }")
 
         # The viewer's choice of dark or light is kept in their browser, which may refuse storage (a private
         # window, blocked site data); then the page simply opens dark.
@@ -57,7 +66,7 @@ def build(hub):
         with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
 
             # ---- Services
-            with ui.card().classes("w-full"):
+            with ui.card().props("flat bordered").classes("w-full"):
                 ui.label("Services").classes("text-base font-medium")
                 rows = {}
                 for key, service in hub.services.items():
@@ -82,7 +91,7 @@ def build(hub):
 
             # ---- Model, speed, power, load, memory
             with ui.grid(columns="repeat(auto-fit, minmax(17rem, 1fr))").classes("w-full gap-4"):
-                with ui.card():
+                with ui.card().props("flat bordered"):
                     ui.label("Model").classes("text-base font-medium")
                     model_label = ui.label().classes("text-xl")
                     model_detail = ui.label().classes("text-sm opacity-70")
@@ -90,26 +99,26 @@ def build(hub):
                     session_bars = []   # (bar, tooltip) per session, rebuilt when the count changes
                     sessions_label = ui.label().classes("text-sm opacity-70")
 
-                with ui.card():
+                with ui.card().props("flat bordered"):
                     ui.label("Generation").classes("text-base font-medium")
                     speed_label = ui.label().classes("text-xl")
                     speed_chart = ui.echart(_spark("tok/s", "#7c6cf0")).classes("w-full h-16")
                     live_label = ui.label().classes("text-sm")
                     last_label = ui.label().classes("text-sm opacity-70")
 
-                with ui.card():
+                with ui.card().props("flat bordered"):
                     ui.label("Power and temperatures").classes("text-base font-medium")
                     power_label = ui.label().classes("text-xl")
                     power_chart = ui.echart(_spark("W", "#e8833a")).classes("w-full h-16")
                     temp_label = ui.label().classes("text-sm opacity-70")
 
-                with ui.card():
+                with ui.card().props("flat bordered"):
                     ui.label("GPU and CPU").classes("text-base font-medium")
                     load_label = ui.label().classes("text-xl")
                     load_chart = ui.echart(_spark("GPU %", "#2f9e72", max_value=100)).classes("w-full h-16")
                     cpu_label = ui.label().classes("text-sm opacity-70")
 
-                with ui.card():
+                with ui.card().props("flat bordered"):
                     ui.label("Memory").classes("text-base font-medium")
                     ram_label = ui.label().classes("text-sm")
                     ram_bar = ui.linear_progress(show_value=False).props("rounded size=10px")
@@ -117,7 +126,7 @@ def build(hub):
                     gtt_bar = ui.linear_progress(show_value=False, color="secondary").props("rounded size=10px")
 
             # ---- Recent requests
-            with ui.card().classes("w-full"):
+            with ui.card().props("flat bordered").classes("w-full"):
                 ui.label("Recent requests").classes("text-base font-medium")
                 columns = [{"name": "time", "label": "Time", "field": "time", "align": "left"},
                            {"name": "tokens", "label": "Prompt → generated", "field": "tokens", "align": "right"},
@@ -161,7 +170,8 @@ def build(hub):
                       error) in rows.items():
                 status = hub.status(key)
                 badge.text = status
-                badge.props(f"color={STATUS_COLORS[status]}")
+                background, foreground = STATUS_COLORS[status]
+                badge.style(f"background: {background} !important; color: {foreground} !important")
                 spinner.visible = status in ("starting", "stopping")
                 state = hub.container[key]
                 detail.text = f"container: {state}" if state not in (None, "running") else ""
