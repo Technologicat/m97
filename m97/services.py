@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import pathlib
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -109,20 +110,33 @@ def openwebui_service(settings):
 # Running podman
 
 async def run(*args, timeout=60):
-    """Run a command, returning `(returncode, stdout, stderr)` as text. A timeout kills it and returns 124."""
-    proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE,
-                                                stderr=asyncio.subprocess.PIPE)
+    """Run a command, returning `(returncode, stdout, stderr)` as text. A timeout kills it and returns 124.
+
+    Returns when the command exits, even if something it started keeps running with its output open.
+    """
+    # The output goes to files rather than pipes: `podman run -d` leaves conmon behind holding them, so reading
+    # a pipe to its end would wait for the container to exit.
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.DEVNULL, stdout=out, stderr=err)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout)
+        except TimeoutError:
+            _kill(proc)
+            await proc.wait()
+            return 124, "", f"{args[0]}: timed out after {timeout} s"
+        except asyncio.CancelledError:
+            _kill(proc)
+            raise
+        out.seek(0)
+        err.seek(0)
+        return proc.returncode, out.read().decode(errors="replace"), err.read().decode(errors="replace")
+
+
+def _kill(proc):
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout)
-    except TimeoutError:
         proc.kill()
-        await proc.wait()
-        return 124, "", f"{args[0]}: timed out after {timeout} s"
-    except asyncio.CancelledError:
-        if proc.returncode is None:
-            proc.kill()
-        raise
-    return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+    except ProcessLookupError:  # it exited just now
+        pass
 
 
 async def container_state(name, *, run=run):
@@ -171,7 +185,7 @@ async def start(service, *, lan, run=run, ready=None, clock=time.monotonic, poll
         if state != "running":
             _, out, err = await run("podman", "logs", "--tail", "20", service.container)
             tail = (out + err).strip()
-            return f"{service.title} stopped while starting (state: {state}). Its last log lines:\n{tail}"
+            return f"{service.title} stopped while starting (state: {state}).\n\nIts last log lines:\n{tail}"
         await asyncio.sleep(poll)
     return (f"{service.title} did not answer within {service.start_timeout:.0f} s. "
             f"The container is still there; its log may say why.")
@@ -199,11 +213,12 @@ EVENT_STATES = {"create": "created", "init": "created", "start": "running", "res
 
 
 async def follow_events(containers, on_state, *, run=run, retry=5.0):
-    """Keep `on_state(name, state)` informed of each container's state, until cancelled.
+    """Keep `on_state(name, state, event)` informed of each container's state, until cancelled.
 
-    Calls it once per container at the start, from `podman container inspect`, and again whenever
-    `podman events` reports a change. If the event stream ends, it is restarted and the states are read
-    afresh, since events in the gap are lost. `state` is `None` for a container that does not exist.
+    Calls it once per container at the start, from `podman container inspect`, with `event` `None`; and
+    again whenever `podman events` reports a change, with `event` the decoded event (a `died` event carries
+    `ContainerExitCode`). If the event stream ends, it is restarted and the states are read afresh, since
+    events in the gap are lost. `state` is `None` for a container that does not exist.
     """
     names = list(containers)
     while True:
@@ -219,7 +234,7 @@ async def follow_events(containers, on_state, *, run=run, retry=5.0):
             continue
         try:
             for name in names:  # after the stream is open, so a change from here on is not missed
-                on_state(name, await container_state(name, run=run))
+                on_state(name, await container_state(name, run=run), None)
             async for line in proc.stdout:
                 try:
                     event = json.loads(line)
@@ -227,7 +242,7 @@ async def follow_events(containers, on_state, *, run=run, retry=5.0):
                     continue
                 name, status = event.get("Name"), event.get("Status")
                 if name in names and status in EVENT_STATES:
-                    on_state(name, EVENT_STATES[status])
+                    on_state(name, EVENT_STATES[status], event)
             await proc.wait()
             logger.warning(f"podman events ended (exit {proc.returncode}), restarting in {retry:.0f} s")
         finally:

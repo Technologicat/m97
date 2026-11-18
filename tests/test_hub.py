@@ -4,10 +4,10 @@ from m97 import hub as hub_module
 from m97.settings import load
 
 
-def make_hub(monkeypatch, *, start, stop):
+def make_hub(monkeypatch, tmp_path, *, start, stop):
     monkeypatch.setattr(hub_module.services, "start", start)
     monkeypatch.setattr(hub_module.services, "stop", stop)
-    hub = hub_module.Hub(load("/nonexistent/settings.toml"))
+    hub = hub_module.Hub(load("/nonexistent/settings.toml"), state_path=tmp_path / "state.json")
 
     async def decision():
         return hub.access
@@ -15,7 +15,7 @@ def make_hub(monkeypatch, *, start, stop):
     return hub
 
 
-def test_stop_cancels_a_start_under_way(monkeypatch):
+def test_stop_cancels_a_start_under_way(monkeypatch, tmp_path):
     events = []
 
     async def start(service, *, lan):
@@ -30,7 +30,7 @@ def test_stop_cancels_a_start_under_way(monkeypatch):
         events.append("stop")
 
     async def scenario():
-        hub = make_hub(monkeypatch, start=start, stop=stop)
+        hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
         hub.start_service("gufo")
         await asyncio.sleep(0.01)
         assert hub.status("gufo") == "starting"
@@ -44,7 +44,7 @@ def test_stop_cancels_a_start_under_way(monkeypatch):
     assert hub.error["gufo"] == ""
 
 
-def test_failed_start_reports_error(monkeypatch):
+def test_failed_start_reports_error(monkeypatch, tmp_path):
     async def start(service, *, lan):
         return "gufo stopped while starting"
 
@@ -52,7 +52,7 @@ def test_failed_start_reports_error(monkeypatch):
         return None
 
     async def scenario():
-        hub = make_hub(monkeypatch, start=start, stop=stop)
+        hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
         hub.start_service("gufo")
         await asyncio.sleep(0.01)
         return hub
@@ -60,3 +60,64 @@ def test_failed_start_reports_error(monkeypatch):
     hub = asyncio.run(scenario())
     assert hub.error["gufo"] == "gufo stopped while starting"
     assert hub.action["gufo"] is None
+
+
+def test_wanted_state_is_remembered_and_a_crash_reported_after_a_reboot(monkeypatch, tmp_path):
+    async def nothing(*args, **kwargs):
+        return None
+
+    hub = make_hub(monkeypatch, tmp_path, start=nothing, stop=nothing)
+    hub.container["gufo"] = "running"
+    hub._remember(now=100.0)
+    assert hub.want["gufo"] == "running"
+    # It dies by itself; the crash is seen live, then it stays down past the grace period.
+    hub.container["gufo"] = "exited"
+    hub._crash["gufo"] = "gufo stopped unexpectedly"
+    hub._remember(now=101.0)
+    assert hub.want["gufo"] == "running", "not yet: a shutdown would look the same for these few seconds"
+    hub._remember(now=131.0)
+    assert hub.want["gufo"] == "stopped"
+    # After a restart of m97, the state and the reason are back.
+    again = make_hub(monkeypatch, tmp_path, start=nothing, stop=nothing)
+    assert again.want["gufo"] == "stopped"
+    assert again.problem["gufo"] == "gufo stopped unexpectedly"
+
+
+def test_pending_autostart_is_not_forgotten_while_waiting_for_the_network(monkeypatch, tmp_path):
+    async def nothing(*args, **kwargs):
+        return None
+
+    hub = make_hub(monkeypatch, tmp_path, start=nothing, stop=nothing)
+    hub.want["gufo"] = "running"
+    hub._autostart_pending.add("gufo")
+    hub._remember(now=0.0)
+    hub._remember(now=100.0)       # longer than the grace period, still waiting
+    assert hub.want["gufo"] == "running"
+    hub._autostart_pending.clear()
+    hub._remember(now=101.0)
+    hub._remember(now=200.0)
+    assert hub.want["gufo"] == "stopped", "control: without the pending autostart, the grace period applies"
+
+
+def test_autostart_starts_gufo_first_and_open_webui_after_it(monkeypatch, tmp_path):
+    events = []
+
+    async def start(service, *, lan):
+        events.append(f"start {service.key}")
+        await asyncio.sleep(0.05)              # a load
+        events.append(f"ready {service.key}")
+
+    async def nothing(*args, **kwargs):
+        return None
+
+    async def scenario():
+        hub = make_hub(monkeypatch, tmp_path, start=start, stop=nothing)
+        monkeypatch.setattr(hub_module.services, "container_state", nothing)
+        monkeypatch.setattr(hub_module.access, "active_connections", lambda: [("uuid", [
+            hub_module.access.ipaddress.ip_interface("192.168.1.5/24")])])
+        hub.want = {"openwebui": "running", "gufo": "running"}
+        await hub._autostart()
+        await asyncio.gather(*hub._action_tasks.values())
+
+    asyncio.run(scenario())
+    assert events == ["start gufo", "ready gufo", "start openwebui", "ready openwebui"]

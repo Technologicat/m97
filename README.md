@@ -78,6 +78,18 @@ server that should start m97 at boot, before anyone logs in, enable it once:
 loginctl enable-linger "$USER"
 ```
 
+**Autostart.** m97 remembers which services were running, and when it starts, say at boot, it starts
+them again. It waits for the network first, since a service started before the machine has joined a
+trusted network would listen on this machine only. gufo comes first, and Open WebUI once gufo is up.
+
+- A service counts as wanted running once m97 sees it running, however it was started: from the page, or
+  from a shell. It counts as wanted stopped once it has been down for half a minute while m97 runs.
+- A service that stops by itself is reported on the page, with its exit code, its last log lines and what
+  to do. m97 does not restart it, and does not start it at boot until it has run again. The report stays
+  across a restart of m97.
+- The state is kept in `~/.local/state/m97/state.json`. To turn autostart off, set `autostart = false` under
+  `[server]`.
+
 **In the foreground**, for trying it out or for debugging. Ctrl+C stops it:
 
 ```bash
@@ -136,7 +148,7 @@ context = 262144
 
 The settings, by table:
 
-- **`[server]`**: `port` (8097).
+- **`[server]`**: `port` (8097), and `autostart` (on; see [running it](#running-it)).
 - **`[access]`**: the `pin`, and the `trusted_networks`; see [who can press the buttons](#who-can-press-the-buttons).
 - **`[gufo]`**: how m97 runs gufo. `image`; `models_dir` (mounted read-only at `/models` in the container);
   `model` and `mtp_model`, as paths relative to `models_dir` (an empty `mtp_model` turns speculative

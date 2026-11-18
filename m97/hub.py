@@ -7,13 +7,14 @@ read from it, so a second open tab costs a render, not a second round of samplin
 
 import asyncio
 import collections
+import datetime
 import json
 import logging
 import time
 import urllib.error
 import urllib.request
 
-from . import access, gufo, sensors, services
+from . import access, gufo, intent, sensors, services
 
 __all__ = ["Hub"]
 
@@ -37,7 +38,7 @@ class Hub:
     of the hub's tasks, never in the middle of an update.
     """
 
-    def __init__(self, settings):
+    def __init__(self, settings, *, state_path=None):
         self.settings = settings
         self.services = {s.key: s for s in (services.gufo_service(settings), services.openwebui_service(settings))}
         self._by_container = {s.container: s.key for s in self.services.values()}
@@ -55,6 +56,17 @@ class Hub:
         self.action = {key: None for key in self.services}      # "start" / "stop" while m97 runs one
         self.error = {key: "" for key in self.services}         # why the last start or stop failed
         self._action_tasks = {}                                  # key -> the asyncio task of its action
+        self.note = {key: "" for key in self.services}          # e.g. "autostart", shown beside the status
+
+        # What should be running, remembered across restarts (see `intent`), and why a service that should
+        # have been running is not: a crash report, kept until the service runs again.
+        self._state_path = state_path or intent.default_state_path()
+        state = intent.load_state(self._state_path)
+        self.want = {key: state["want"].get(key) for key in self.services}
+        self.problem = {key: state["problem"].get(key, "") for key in self.services}
+        self._down_since = {key: None for key in self.services}
+        self._crash = {key: "" for key in self.services}          # a crash seen live, not yet remembered
+        self._autostart_pending = set()   # keys waiting for the network, to be started; count as starting
 
         self.props = None           # gufo's /props, read once each time it becomes ready
         self.slots = []             # parsed /slots
@@ -77,6 +89,8 @@ class Hub:
         self._tasks = [asyncio.create_task(self._sampling_loop()),
                        asyncio.create_task(services.follow_events(list(self._by_container), self._on_container)),
                        asyncio.create_task(self._network_loop())]
+        if self.settings["server"]["autostart"]:
+            self._tasks.append(asyncio.create_task(self._autostart()))
 
     async def stop(self):
         tasks = self._tasks + ([self._log_task] if self._log_task else [])
@@ -139,12 +153,15 @@ class Hub:
         finally:
             if self.action[key] == verb:
                 self.action[key] = None
+                self.note[key] = ""
         self.error[key] = error or ""
+        if verb == "start" and error:
+            self._crash[key] = error   # remembered like a crash: it will not be autostarted until it has run
 
     # ----------------------------------------------------------------------------
     # Background tasks
 
-    def _on_container(self, name, state):
+    def _on_container(self, name, state, event):
         key = self._by_container.get(name)
         if key is None:
             return
@@ -153,6 +170,89 @@ class Hub:
             self.ready[key] = False
         if key == "gufo":
             self._follow_gufo_log(state == "running")
+        if event is not None and event.get("Status") == "died" and self.action[key] is None:
+            asyncio.create_task(self._check_crash(key, event.get("ContainerExitCode")))
+
+    async def _check_crash(self, key, maybe_exit_code, *, settle=10.0):
+        """Report a service that died by itself, as opposed to being stopped.
+
+        A deliberate stop, by m97 or by a shell script, removes the container within a second or so of its
+        death; a crash leaves it behind, exited. So wait a little, then look.
+        """
+        await asyncio.sleep(settle)
+        service = self.services[key]
+        state = await services.container_state(service.container)
+        if state is None or state == "running" or self.action[key] is not None:
+            return
+        _, out, err = await services.run("podman", "logs", "--tail", "15", service.container)
+        when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        code = f" (exit code {maybe_exit_code})" if maybe_exit_code is not None else ""
+        # A blank line separates what to read from the details; the page folds the details away.
+        message = (f"{service.title} stopped unexpectedly at {when}{code}. m97 does not restart it by itself, "
+                   f"and will not start it at boot until it has run again. Press Start to try again; if it keeps "
+                   f"stopping, `podman logs {service.container}` on the server has the whole log.\n\n"
+                   f"Its last log lines:\n{(out + err).strip()}")
+        logger.warning(f"{service.container}: stopped unexpectedly{code}")
+        self._crash[key] = message
+        self.error[key] = message
+
+    def _remember(self, now):
+        """Update what should be running from what is seen, and save it when it changes."""
+        changed = False
+        for key in self.services:
+            action = self.action[key] or ("start" if key in self._autostart_pending else None)
+            want, self._down_since[key] = intent.track(self.want[key], self._down_since[key],
+                                                       running=self.container[key] == "running",
+                                                       action=action, now=now)
+            if want == self.want[key]:
+                continue
+            self.want[key], changed = want, True
+            if want == "running":
+                self.problem[key] = self._crash[key] = ""
+            elif self._crash[key]:
+                self.problem[key] = self._crash[key]
+        if changed:
+            try:
+                intent.save_state(self._state_path, {"want": {k: v for k, v in self.want.items() if v},
+                                                     "problem": {k: v for k, v in self.problem.items() if v}})
+            except OSError as exc:
+                logger.warning(f"{self._state_path}: could not save which services should run: {exc}")
+
+    async def _autostart(self, *, network_timeout=120.0, poll=2.0):
+        """Start the services that were running when m97 last ran, once the network is up.
+
+        Waiting matters because the network decides where they listen: started before NetworkManager has
+        connected, there is no trusted network yet, and gufo would serve this machine only.
+        """
+        targets = [key for key, want in self.want.items() if want == "running"]
+        if not targets:
+            return
+        for key in targets:
+            self.note[key] = "autostart: waiting for the network"
+        self._autostart_pending.update(targets)
+        deadline = time.monotonic() + network_timeout
+        while time.monotonic() < deadline:
+            connections = await asyncio.to_thread(access.active_connections)
+            if any(not address.ip.is_loopback for _, addresses in connections for address in addresses):
+                break
+            await asyncio.sleep(poll)
+        else:
+            logger.warning(f"no network after {network_timeout:.0f} s; starting anyway")
+        # gufo first, and the rest once its start has finished: Open WebUI is a front end to it.
+        for key in sorted(targets, key=lambda k: k != "gufo"):
+            if await services.container_state(self.services[key].container) == "running":
+                self._autostart_pending.discard(key)
+                self.note[key] = ""
+                continue
+            logger.info(f"{key}: was running when m97 last ran; starting it")
+            self.note[key] = "autostart"
+            self.start_service(key)
+            self._autostart_pending.discard(key)
+            if key == "gufo" and len(targets) > 1:
+                for other in targets:
+                    if other != key:
+                        self.note[other] = "autostart: waiting for gufo"
+                await asyncio.gather(self._action_tasks[key], return_exceptions=True)
 
     def _follow_gufo_log(self, running):
         if running and (self._log_task is None or self._log_task.done()):
@@ -224,6 +324,7 @@ class Hub:
         if self.container["gufo"] != "running" or not self.ready["gufo"]:
             self.slots, self.metrics, self.gen_tps, self._previous_tokens = [], {}, None, None
             self._previous_slots = {}
+        self._remember(now)
         self.history.append((now, {"ppt_w": self.latest.get("ppt_w"),
                                    "gpu_busy_pct": self.latest.get("gpu_busy_pct"),
                                    "cpu_busy_pct": self.latest.get("cpu_busy_pct"),

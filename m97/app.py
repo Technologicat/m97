@@ -44,6 +44,7 @@ def build(hub):
         # Quasar marks a disabled button only by fading it to 70 % opacity, which beside an enabled one reads as a
         # slightly different shade of the same button. Grey it out instead.
         ui.add_css(".q-btn.disabled { opacity: 0.3 !important; filter: grayscale(1); }")
+        ui.add_css(".q-card { border-radius: 10px; } .q-btn { border-radius: 8px; }")
         # Quasar's red (#c10015) is 2.6:1 on the dark background; red-400 is 6.1:1 there, though too light on
         # white. Its variable reaches the Stop buttons and the error text alike. `!important` because Quasar
         # sets the variable as an inline style on <body>, which an ordinary rule cannot override.
@@ -82,9 +83,12 @@ def build(hub):
                         start_button = ui.button("Start", on_click=lambda k=key: act(k, "start")).props("unelevated")
                         stop_button = ui.button("Stop", on_click=lambda k=key: act(k, "stop"),
                                                 color="negative").props("outline")
-                    error = ui.label().classes("text-sm text-negative whitespace-pre-wrap")
+                    with ui.column().classes("w-full gap-0") as error:
+                        error_summary = ui.label().classes("text-sm text-negative")
+                        with ui.expansion("Details").props("dense").classes("text-sm w-full") as error_more:
+                            error_details = ui.label().classes("text-xs font-mono whitespace-pre-wrap opacity-80")
                     rows[key] = (badge, spinner, detail, (address, address_plain, scope), start_button, stop_button,
-                                 error)
+                                 (error, error_summary, error_more, error_details))
                 with ui.row().classes("w-full items-center gap-3"):
                     lock_note = ui.label().classes("text-sm opacity-70")
                     pin_input = ui.input("PIN", password=True).props("dense outlined").classes("w-32")
@@ -167,14 +171,14 @@ def build(hub):
             usable = refresh_access()
 
             for key, (badge, spinner, detail, (address, address_plain, scope), start_button, stop_button,
-                      error) in rows.items():
+                      (error, error_summary, error_more, error_details)) in rows.items():
                 status = hub.status(key)
                 badge.text = status
                 background, foreground = STATUS_COLORS[status]
                 badge.style(f"background: {background} !important; color: {foreground} !important")
                 spinner.visible = status in ("starting", "stopping")
                 state = hub.container[key]
-                detail.text = f"container: {state}" if state not in (None, "running") else ""
+                detail.text = hub.note[key] or (f"container: {state}" if state not in (None, "running") else "")
                 service, where = hub.services[key], hub.scope[key]
                 host = socket.gethostname() if where == "all" else "127.0.0.1"
                 url = f"http://{host}:{service.port}{service.url_path}" if where else ""
@@ -187,8 +191,13 @@ def build(hub):
                 # Stop stays available while starting: it cancels the start and removes the container.
                 start_button.enabled = usable and status == "stopped"
                 stop_button.enabled = usable and status in ("running", "starting")
-                error.text = hub.error[key]
-                error.visible = bool(hub.error[key])
+                # A live error, or one remembered from before m97 restarted. What to read comes before the
+                # first blank line; the rest, usually log lines, is folded away.
+                message = hub.error[key] or hub.problem[key]
+                summary, _, details = message.partition("\n\n")
+                error_summary.text, error_details.text = summary, details
+                error_more.visible = bool(details)
+                error.visible = bool(message)
 
             props = hub.props or {}
             if hub.ready["gufo"]:

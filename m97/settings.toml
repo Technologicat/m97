@@ -6,6 +6,10 @@
 
 [server]
 port = 8097                  # m97's own page. Listens on 127.0.0.1, or on all interfaces with `--lan`.
+# Start the services that were running when m97 last ran, once the network is up. A service counts as
+# wanted running once seen running, and as wanted stopped once down for half a minute, so one that crashed
+# is not brought back at boot.
+autostart = true
 
 [access]
 # The start and stop buttons are open on a trusted network, and need this PIN on any other.

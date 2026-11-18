@@ -3,7 +3,7 @@ import pathlib
 
 import pytest
 
-from m97.services import (Service, derive_status, gufo_run_args, listen_scope, openwebui_run_args,
+from m97.services import (Service, derive_status, gufo_run_args, listen_scope, openwebui_run_args, run,
                           parse_proc_net_tcp, start, stop)
 from m97.settings import load
 
@@ -189,3 +189,20 @@ def test_listen_scope(tmp_path):
     assert listen_scope(3000, root=str(tmp_path)) == "local"
     assert listen_scope(9999, root=tmp_path) is None
     assert listen_scope(8080, root=tmp_path / "nowhere") is None
+
+
+# --------------------------------------------------------------------------------
+# Running commands
+
+@pytest.mark.parametrize("loop", ["asyncio", "uvloop"])
+def test_run_returns_when_the_command_exits_even_if_a_child_keeps_its_output_open(loop):
+    # `podman run -d` leaves conmon behind holding the command's stdout; waiting for end-of-file on it waited
+    # for the container to exit (under uvloop, which NiceGUI runs on). A backgrounded `sleep` does the same.
+    runner = asyncio.run if loop == "asyncio" else pytest.importorskip("uvloop").run
+    code, out, err = runner(run("sh", "-c", "sleep 3 & echo hi", timeout=2))
+    assert (code, out) == (0, "hi\n"), f"run waited for the background child: {code}, {err!r}"
+
+
+def test_run_times_out():
+    code, _, err = asyncio.run(run("sleep", "5", timeout=0.2))
+    assert code == 124 and "timed out" in err
