@@ -129,6 +129,14 @@ def build(hub):
                     gtt_label = ui.label().classes("text-sm mt-2")
                     gtt_bar = ui.linear_progress(show_value=False, color="secondary").props("rounded size=10px")
 
+                with ui.card().props("flat bordered"):
+                    ui.label("CPU threads").classes("text-base font-medium")
+                    threads_label = ui.label().classes("text-sm opacity-70")
+                    # One bar per hardware thread, in CPU number order, 16 to a row.
+                    threads_grid = ui.element("div").classes("w-full mt-2 grid gap-[3px]").style(
+                        "grid-template-columns: repeat(16, minmax(0, 1fr))")
+                    thread_bars = []   # (fill, tooltip) per thread, rebuilt when the count changes
+
             # ---- Recent requests
             with ui.card().props("flat bordered").classes("w-full"):
                 ui.label("Recent requests").classes("text-base font-medium")
@@ -248,6 +256,24 @@ def build(hub):
             gtt_used, gtt_total = s.get("gtt_used_gib"), s.get("gtt_total_gib")
             gtt_label.text = f"GTT (mapped by the GPU) {_fmt(gtt_used, '.1f')} of {_fmt(gtt_total, '.0f', ' GiB')}"
             gtt_bar.value = gtt_used / gtt_total if gtt_used is not None and gtt_total else 0
+
+            per_thread = s.get("cpu_thread_pct") or []
+            if len(thread_bars) != len(per_thread):
+                threads_grid.clear()
+                thread_bars.clear()
+                with threads_grid:
+                    for _ in per_thread:
+                        with ui.element("div").classes("relative h-10 rounded-sm overflow-hidden").style(
+                                "background: rgba(128,128,128,.2)"):
+                            fill = ui.element("div").classes("absolute bottom-0 left-0 right-0").style(
+                                "background: #3b9ede; height: 0%")
+                            thread_bars.append((fill, ui.tooltip()))
+            for n, ((fill, tip), pct) in enumerate(zip(thread_bars, per_thread)):
+                fill.style(f"background: #3b9ede; height: {0 if pct is None else min(100.0, pct):.0f}%")
+                tip.text = f"CPU {n}: {_fmt(pct, '.0f', ' %')}"
+            busy = [pct for pct in per_thread if pct is not None]
+            threads_label.text = (f"{len(per_thread)} threads · busiest {max(busy):.0f} % · "
+                                  f"average {sum(busy) / len(busy):.0f} %") if busy else ""
 
             now = time.monotonic()
             for chart, series in ((speed_chart, "gen_tps"), (power_chart, "ppt_w"), (load_chart, "gpu_busy_pct")):

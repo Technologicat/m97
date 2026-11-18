@@ -37,9 +37,11 @@ def tree(tmp_path):
 
 
 def test_parse_proc_stat():
-    assert parse_proc_stat(STAT_1) == (150, 1000)
-    assert parse_proc_stat("intr 1 2 3\n") is None
-    assert parse_proc_stat("cpu  x y z\n") is None
+    stats = parse_proc_stat(STAT_1)
+    assert stats["cpu"] == (150, 1000)
+    assert stats["cpu0"] == (1 + 2 + 3 + 6 + 7 + 8, 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8)
+    assert parse_proc_stat("intr 1 2 3\n") == {}
+    assert parse_proc_stat("cpu  x y z\n") == {}
 
 
 def test_parse_meminfo():
@@ -65,6 +67,14 @@ def test_sample(tree, as_type):
     assert first["cpu_busy_pct"] is None, "there is no previous sample to take a difference against"
     write(tree / "proc/stat", STAT_2)
     assert sample()["cpu_busy_pct"] == pytest.approx(40.0)
+
+
+def test_per_thread(tree):
+    write(tree / "proc/stat", "cpu  0 0 0 0 0 0 0 0\ncpu1 0 0 0 100 0 0 0 0\ncpu0 0 0 0 100 0 0 0 0\n")
+    sample = make_sampler(root=tree)
+    assert sample()["cpu_thread_pct"] == [None, None]
+    write(tree / "proc/stat", "cpu  0 0 0 0 0 0 0 0\ncpu1 50 0 0 150 0 0 0 0\ncpu0 25 0 0 175 0 0 0 0\n")
+    assert sample()["cpu_thread_pct"] == [pytest.approx(25.0), pytest.approx(50.0)], "in CPU number order"
 
 
 def test_missing_sensors_give_none(tmp_path):

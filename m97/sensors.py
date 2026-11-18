@@ -37,24 +37,33 @@ def _scale(value, divisor):
 
 
 def parse_proc_stat(text):
-    """Return `(busy, total)` jiffies from the aggregate `cpu` line of /proc/stat, or `None`.
+    """Return `{name: (busy, total)}` jiffies for the `cpu` lines of /proc/stat.
 
-    Busy is everything except idle and iowait. Guest time is already counted in user and nice, so it is
-    left out of the total rather than counted twice.
+    `"cpu"` is the whole machine, `"cpu0"`, `"cpu1"`, ... each hardware thread. Busy is everything except
+    idle and iowait. Guest time is already counted in user and nice, so it is left out of the total rather
+    than counted twice. A line that does not parse is skipped.
     """
+    stats = {}
     for line in text.splitlines():
         fields = line.split()
-        if fields and fields[0] == "cpu":
-            try:
-                values = [int(v) for v in fields[1:9]]  # user nice system idle iowait irq softirq steal
-            except ValueError:
-                return None
-            if len(values) < 4:
-                return None
-            total = sum(values)
-            idle = values[3] + (values[4] if len(values) > 4 else 0)
-            return total - idle, total
-    return None
+        if not fields or not fields[0].startswith("cpu"):
+            continue
+        try:
+            values = [int(v) for v in fields[1:9]]  # user nice system idle iowait irq softirq steal
+        except ValueError:
+            continue
+        if len(values) < 4:
+            continue
+        total = sum(values)
+        idle = values[3] + (values[4] if len(values) > 4 else 0)
+        stats[fields[0]] = (total - idle, total)
+    return stats
+
+
+def _busy_pct(before, now):
+    if before is None or now is None or now[1] <= before[1]:
+        return None
+    return 100.0 * (now[0] - before[0]) / (now[1] - before[1])
 
 
 def parse_meminfo(text):
@@ -75,9 +84,10 @@ def make_sampler(*, root="/"):
     """Locate the sensors once, and return a function that takes one sample as a dict.
 
     The keys: `ppt_w` (socket power), `cpu_temp_c` (Tctl), `gpu_temp_c` (edge), `gpu_busy_pct`, `gpu_mhz`,
-    `cpu_busy_pct`, `load1`, `ram_used_gib`, `ram_total_gib`, `gtt_used_gib`, `gtt_total_gib`. Any of them
-    may be `None`. `cpu_busy_pct` is the share of CPU time spent busy since the previous sample, so the first
-    sample has `None` there.
+    `cpu_busy_pct`, `cpu_thread_pct`, `load1`, `ram_used_gib`, `ram_total_gib`, `gtt_used_gib`,
+    `gtt_total_gib`. Any of them may be `None`. `cpu_busy_pct` is the share of CPU time spent busy since the
+    previous sample, so the first sample has `None` there; `cpu_thread_pct` is the same per hardware thread,
+    a list in CPU number order, with `None` for a thread that has no figure.
 
     `root` relocates every path, for testing against a fake tree.
     """
@@ -91,20 +101,19 @@ def make_sampler(*, root="/"):
     def at(base, name):
         return None if base is None else base / name
 
-    previous = None  # (busy, total) jiffies at the last sample
+    previous = {}  # name -> (busy, total) jiffies at the last sample
 
-    def cpu_busy_pct():
+    def cpu_busy():
+        """`(whole machine %, [per thread %])` since the last call."""
         nonlocal previous
         try:
-            maybe_now = parse_proc_stat((proc / "stat").read_text())
+            now = parse_proc_stat((proc / "stat").read_text())
         except OSError:
-            maybe_now = None
-        if maybe_now is None:
-            return None
-        before, previous = previous, maybe_now
-        if before is None or maybe_now[1] <= before[1]:
-            return None
-        return 100.0 * (maybe_now[0] - before[0]) / (maybe_now[1] - before[1])
+            now = {}
+        before, previous = previous, now
+        threads = sorted((int(name[3:]) for name in now if name[3:].isdigit()))
+        per_thread = [_busy_pct(before.get(f"cpu{n}"), now[f"cpu{n}"]) for n in threads]
+        return _busy_pct(before.get("cpu"), now.get("cpu")), (per_thread if threads else None)
 
     def load1():
         try:
@@ -113,6 +122,7 @@ def make_sampler(*, root="/"):
             return None
 
     def sample():
+        cpu_pct, thread_pct = cpu_busy()
         try:
             meminfo = parse_meminfo((proc / "meminfo").read_text())
         except OSError:
@@ -125,7 +135,8 @@ def make_sampler(*, root="/"):
             "gpu_temp_c": _scale(_read_int(at(amdgpu, "temp1_input")), 1e3),
             "gpu_busy_pct": _read_int(at(device, "gpu_busy_percent")),
             "gpu_mhz": _scale(_read_int(at(amdgpu, "freq1_input")), 1e6),       # Hz
-            "cpu_busy_pct": cpu_busy_pct(),
+            "cpu_busy_pct": cpu_pct,
+            "cpu_thread_pct": thread_pct,
             "load1": load1(),
             "ram_used_gib": (_scale(ram_total - ram_available, 2**30)
                              if ram_total is not None and ram_available is not None else None),
