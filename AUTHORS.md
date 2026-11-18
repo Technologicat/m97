@@ -12,3 +12,5 @@ Juha Jeronen (@Technologicat):
 Claude Opus 5.5 (Anthropic), as AI pair programmer:
 
 - The design brief, including the survey of what gufo and the host expose for monitoring.
+- The implementation: settings, parsers, sensors, container control, the access rule, the page, the
+  command-line verbs and the systemd service, and their tests.
