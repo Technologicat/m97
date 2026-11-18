@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from m97.gufo import completed_request, parse_log_line, parse_metrics, parse_slots
+from m97.gufo import completed_request, parse_log_line, parse_metrics, parse_slots, with_slot_rates
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -135,3 +135,22 @@ def test_log_field_missing():
 def test_log_unparseable(line):
     assert parse_log_line(line) is None
     assert completed_request(line) is None
+
+
+# --------------------------------------------------------------------------------
+# Live speed per session
+
+def slot(sid, busy, decoded):
+    return {"id": sid, "busy": busy, "n_ctx": 262144, "prompt_tokens": 24, "decoded": decoded}
+
+
+def test_slot_rates():
+    slots, previous = with_slot_rates([slot(0, True, 73), slot(1, True, 88), slot(2, False, None)], {}, 10.0)
+    assert [s["tps"] for s in slots] == [None, None, None], "a first sample has nothing to compare with"
+    slots, previous = with_slot_rates([slot(0, True, 95), slot(1, True, 5), slot(2, False, None)], previous, 11.0)
+    assert slots[0]["tps"] == pytest.approx(22.0)
+    assert slots[1]["tps"] is None, "the count went down: a new request began in that session"
+    assert slots[2]["tps"] is None
+    slots, previous = with_slot_rates([slot(0, False, None), slot(1, True, 25), slot(2, False, None)], previous, 12.0)
+    assert slots[0]["tps"] is None and 0 not in previous, "an idle session forgets its count"
+    assert slots[1]["tps"] == pytest.approx(20.0)

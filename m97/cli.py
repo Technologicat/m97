@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import socket
 import sys
 
 from . import __version__, settings as settings_module
@@ -32,9 +33,14 @@ def main(argv=None):
     from .app import build
     from .hub import Hub
 
+    port = settings["server"]["port"]
+    if args.lan:
+        print(f"m97: http://{socket.gethostname()}:{port}  (all interfaces)", flush=True)
+    else:
+        print(f"m97: http://127.0.0.1:{port}  (this machine only; --lan to serve the network)", flush=True)
     build(Hub(settings))
-    ui.run(host="0.0.0.0" if args.lan else "127.0.0.1", port=settings["server"]["port"],
-           title="m97", reload=False, show=False, dark=None,
+    ui.run(host="0.0.0.0" if args.lan else "127.0.0.1", port=port,
+           title="m97", reload=False, show=False, dark=True,
            # The page refreshes itself from a timer, and uses no bindings, so the 10 Hz binding sweep would
            # only wake the CPU.
            binding_refresh_interval=None,

@@ -9,7 +9,7 @@ import datetime
 import re
 
 __all__ = ["parse_metrics",
-           "parse_slots",
+           "parse_slots", "with_slot_rates",
            "parse_log_line", "completed_request"]
 
 # What the metrics mean, as observed on gufo 0.34.0 (2026-11-18), three concurrent chat requests:
@@ -68,6 +68,28 @@ def parse_slots(data):
                       "prompt_tokens": entry.get("n_prompt_tokens"),
                       "decoded": maybe_first.get("n_decoded") if isinstance(maybe_first, dict) else None})
     return slots
+
+
+def with_slot_rates(slots, previous, now):
+    """Add each busy session's live generation speed to `slots`, from the change in its decoded tokens.
+
+    `slots` is what `parse_slots` returns, `previous` what the last call returned as its second value (start
+    with `{}`), `now` a monotonic time in seconds. Returns `(slots, previous)`: copies of the slot dicts with
+    `tps` added (`None` when idle, on the first sample of a request, or if the count went backwards, which
+    means a new request began in that session), and the state for the next call.
+    """
+    rated, seen = [], {}
+    for slot in slots:
+        slot = dict(slot, tps=None)
+        decoded = slot["decoded"]
+        if slot["busy"] and isinstance(decoded, (int, float)):
+            seen[slot["id"]] = (now, decoded)
+            if slot["id"] in previous:
+                t0, decoded0 = previous[slot["id"]]
+                if now > t0 and decoded >= decoded0:
+                    slot["tps"] = (decoded - decoded0) / (now - t0)
+        rated.append(slot)
+    return rated, seen
 
 
 # `2026-11-18 08:56:50 [INFO] [http] key=value key=value ...`. gufo writes the timestamp in UTC.

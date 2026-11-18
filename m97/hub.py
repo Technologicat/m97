@@ -63,6 +63,7 @@ class Hub:
 
         self.access = access.decide(settings["access"], [])   # replaced as soon as the network is read
         self._previous_tokens = None   # (monotonic time, tokens_predicted_total)
+        self._previous_slots = {}      # session id -> (monotonic time, tokens decoded so far)
         self._tasks = []
         self._log_task = None
         self.pin_allowed, self.pin_failed = access.make_rate_limiter()
@@ -219,6 +220,7 @@ class Hub:
                 self.ready[key] = False
         if self.container["gufo"] != "running" or not self.ready["gufo"]:
             self.slots, self.metrics, self.gen_tps, self._previous_tokens = [], {}, None, None
+            self._previous_slots = {}
         self.history.append((now, {"ppt_w": self.latest.get("ppt_w"),
                                    "gpu_busy_pct": self.latest.get("gpu_busy_pct"),
                                    "cpu_busy_pct": self.latest.get("cpu_busy_pct"),
@@ -234,7 +236,8 @@ class Hub:
             return
         if not was_ready or self.props is None:
             self.props = _json(await asyncio.to_thread(_fetch, f"{base}/props"))
-        self.slots = gufo.parse_slots(_json(await asyncio.to_thread(_fetch, f"{base}/slots")))
+        slots = gufo.parse_slots(_json(await asyncio.to_thread(_fetch, f"{base}/slots")))
+        self.slots, self._previous_slots = gufo.with_slot_rates(slots, self._previous_slots, now)
         text = await asyncio.to_thread(_fetch, f"{base}/metrics")
         self.metrics = gufo.parse_metrics(text) if text else {}
         tokens = self.metrics.get("llamacpp:tokens_predicted_total")

@@ -35,12 +35,15 @@ def build(hub):
     @ui.page("/")
     def index(client):
         ui.page_title(f"m97 · {socket.gethostname()}")
-        ui.dark_mode(None)  # follow the viewer's system setting
+        dark = ui.dark_mode(True)
         unlocked = {"by_pin": False}   # per page: a right PIN opens the buttons until the page is reloaded
 
         with ui.header().classes("items-center justify-between px-4 py-2"):
             ui.label(f"m97 · {socket.gethostname()}").classes("text-lg font-medium")
-            clock_label = ui.label().classes("text-sm opacity-80")
+            with ui.row().classes("items-center gap-2"):
+                clock_label = ui.label().classes("text-sm opacity-80")
+                ui.button(icon="contrast", on_click=lambda: dark.set_value(not dark.value)).props(
+                    "flat round dense color=white").tooltip("Dark or light")
 
         with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
 
@@ -78,6 +81,7 @@ def build(hub):
                     ui.label("Generation").classes("text-base font-medium")
                     speed_label = ui.label().classes("text-xl")
                     speed_chart = ui.echart(_spark("tok/s", "#7c6cf0")).classes("w-full h-16")
+                    live_label = ui.label().classes("text-sm")
                     last_label = ui.label().classes("text-sm opacity-70")
 
                 with ui.card():
@@ -172,14 +176,17 @@ def build(hub):
                             session_bars.append((bar, ui.tooltip()))
             for (bar, tip), slot in zip(session_bars, hub.slots):
                 bar.style(f"background: {'#7c6cf0' if slot['busy'] else 'rgba(128,128,128,.25)'}")
-                tip.text = (f"session {slot['id']}: generating, {slot['decoded']} tokens so far" if slot["busy"]
-                            else f"session {slot['id']}: idle")
+                tip.text = (f"session {slot['id']}: generating at {_fmt(slot['tps'], '.1f', ' tok/s')}, "
+                            f"{slot['decoded']} tokens so far" if slot["busy"] else f"session {slot['id']}: idle")
             busy_slots = sum(1 for s in hub.slots if s["busy"])
             deferred = hub.metrics.get("llamacpp:requests_deferred") or 0
             sessions_label.text = (f"{busy_slots} of {len(hub.slots)} sessions busy"
                                    + (f", {deferred:.0f} waiting" if deferred else "")) if hub.slots else ""
 
             speed_label.text = _fmt(hub.gen_tps, ".1f", " tok/s") if hub.ready["gufo"] else "–"
+            live = [slot["tps"] for slot in hub.slots if slot["busy"] and slot["tps"] is not None]
+            live_label.text = f"Now, per session: {' · '.join(f'{tps:.1f}' for tps in live)} tok/s" if live else ""
+            live_label.visible = bool(live)
             if hub.requests:
                 last = hub.requests[-1]
                 last_label.text = (f"Last request: {_fmt(last.get('decode_tps'), '.1f')} tok/s generation, "
