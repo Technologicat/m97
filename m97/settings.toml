@@ -1,0 +1,47 @@
+# m97's defaults.
+#
+# Don't edit this file. Put your own values in ~/.config/m97/settings.toml, which overrides this one key by
+# key: a table there merges into the table here, and any other value — an array included — replaces the
+# default whole. A key that has no default here is reported as a probable typo, and ignored.
+
+[server]
+port = 8097                  # m97's own page. Listens on 127.0.0.1, or on all interfaces with `--lan`.
+
+[access]
+# The start and stop buttons are open on a trusted network, and need this PIN on any other.
+# Empty means no PIN: off the trusted networks, the buttons stay locked.
+pin = ""
+
+# The trusted networks, one table each. `connections` lists NetworkManager connection UUIDs
+# (`nmcli -t -f NAME,UUID connection show`); a network with several saved profiles, say one per Wi-Fi band,
+# lists them all. `subnet` is optional, and if given, the machine's address must also be inside it.
+#
+#   [[access.trusted_networks]]
+#   name = "home"
+#   connections = ["0b5ea8d4-...", "..."]
+#   subnet = "192.168.1.0/24"
+trusted_networks = []
+
+[history]
+seconds = 600                # how far back the graphs reach
+interval = 1.0               # seconds between samples
+
+[gufo]
+container = "gufo"           # the podman container's name
+image = "ghcr.io/gufo-org/toolboxes/gufo-runtime:latest"
+models_dir = "~/models"      # mounted read-only at /models in the container
+model = "flash-next/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"  # relative to models_dir
+mtp_model = "flash-next/MTP/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf"               # empty: no speculative decoding
+served_name = "flash-next"   # the model ID clients ask for
+sessions = 0                 # parallel sessions; 0: gufo's default
+context = 0                  # tokens per session; 0: gufo's default
+port = 8080
+extra_args = []              # appended to `gufo serve ... llm`, e.g. ["--cache-ram-bytes", "off"]
+start_timeout = 600          # seconds; a cold start reads the whole model from disk
+
+[openwebui]
+container = "open-webui"
+image = "ghcr.io/open-webui/open-webui:v0.13.3"
+volume = "open-webui"        # podman volume holding accounts, chats and settings
+port = 3000
+start_timeout = 300
