@@ -108,11 +108,19 @@ All readable without root.
 - **NiceGUI.** The prototype (a start/stop button for gufo, status updating live through a ~35 s start)
   worked on NiceGUI 4.0.0 under Python 3.14, at about 0.2 % of one core with a tab open and gufo up.
 - **Trusted network = the active NetworkManager connection's UUID**, with an optional subnet check on top.
-  NM activates a saved Wi-Fi profile only when the SSID matches and the WPA handshake succeeds, so a network
-  borrowing the name does not match. A bare SSID can be borrowed, and a subnet says little: the travel
-  network's 192.168.1.0/24 is a common router default. Checked at each button press, so a network change
-  while m97 runs is picked up. Gap: a wired profile matches any cable; when wired networking is used, the
-  gateway's MAC address is the identifier to add.
+  NM offers a saved Wi-Fi profile to an access point only when the SSID matches *and* the AP's advertised
+  security is compatible with the profile's (`nm_wifi_ap_check_compatible` in NM's
+  `src/core/devices/wifi/nm-wifi-ap.c`, read 2026-11-18), so an open network borrowing the name is not
+  matched; and a WPA-PSK connection completes only if the AP knows the key. Anyone who knows the key can
+  still impersonate the network, which is inherent to a shared key. A bare SSID can be borrowed, and a
+  subnet says little: the travel network's 192.168.1.0/24 is a common router default. Checked at each button
+  press, so a network change while m97 runs is picked up.
+  - One network can have several profiles (the travel router's 2.4 and 5 GHz bands are two), so the config
+    lists UUIDs per network.
+  - A network with no saved profile on this machine (the phone hotspot, as of 2026-11-18) gets its UUID
+    once it is first joined.
+  - Gap: a wired profile matches any cable; when wired networking is used, the gateway's MAC address is the
+    identifier to add.
 - **Config: TOML, with overrides.** Defaults ship in the package as `settings.toml`; the user's
   `~/.config/m97/settings.toml` overrides them key by key (tables merge, other values replace whole, arrays
   included). A key with no default is reported as a probable typo. The PIN and the trusted networks live
@@ -122,7 +130,10 @@ All readable without root.
 - **gufo is started with `--lan` only on a trusted network**; elsewhere it stays on `127.0.0.1`, whoever
   presses the button.
 - **m97 runs the containers itself**, rather than calling dotclaude's wrappers: those hardcode one machine's
-  model, and other gufo users most likely have a bare `podman run` line rather than scripts. Everything
+  model, and gufo's own docs give users no wrapper to call. Its README's quickstart (checked 2026-11-18)
+  defines a shell function running `podman run --rm -it ... gufo "$@"` in the foreground, with no container
+  name; its install page adds a foreground `podman run --rm` example publishing port 8080 and, besides the container, a Debian
+  package, Nix and a source build, which run `gufo` natively with no container at all. Everything
   machine-specific comes from the config: for gufo the image, models directory, model, MTP model, served
   name, sessions, context, port and extra arguments; for Open WebUI the image, volume, port and gufo URL.
   The awkward cases the wrappers handle carry over (a leftover container in another state, a container
