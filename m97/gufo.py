@@ -1,0 +1,118 @@
+"""Reading gufo: its Prometheus metrics, its `/slots` view, and its log lines.
+
+Everything here parses defensively. These formats are gufo's, they can change between versions, and a
+dashboard that crashes on an unexpected line is worse than one that shows a blank where the line was. So a
+line or field that does not parse is skipped, and a missing field comes back as `None`.
+"""
+
+import datetime
+import re
+
+__all__ = ["parse_metrics",
+           "parse_slots",
+           "parse_log_line", "completed_request"]
+
+# What the metrics mean, as observed on gufo 0.34.0 (2026-11-18), three concurrent chat requests:
+#
+#   - `llamacpp:tokens_predicted_total` counts up *during* a request (204 tokens four seconds in), so its
+#     change over a sampling interval is the server's total generation throughput, live.
+#   - `llamacpp:tokens_predicted_seconds_total` and `prompt_seconds_total` stay at 0 until a request
+#     finishes, and then add that request's own decode (prefill) time. Summed over concurrent requests,
+#     they are per-request time, not wall time, so tokens over seconds from them is the average
+#     per-request speed, which is below the total throughput whenever requests overlap.
+#   - The gauges `predicted_tokens_seconds` and `prompt_tokens_seconds` read 0 mid-request, and afterwards
+#     hold the *last finished* request's speed: 17.89 and 189.0 matched that request's logged `decode_tps`
+#     and `prefill_tps` exactly. Not a window average, so not worth plotting.
+
+_METRIC = re.compile(r"^([A-Za-z_:][A-Za-z0-9_:]*)(\{[^}]*\})?\s+(\S+)")
+
+
+def parse_metrics(text):
+    """Parse Prometheus text exposition into `{name: value}`, values as floats.
+
+    Comments and lines that do not parse are skipped. A metric with labels is keyed by its name plus the
+    label set as written, e.g. `name{a="b"}`; gufo 0.34.0 uses none.
+    """
+    metrics = {}
+    for line in text.splitlines():
+        if line.startswith("#"):
+            continue
+        match = _METRIC.match(line)
+        if match is None:
+            continue
+        name, labels, value = match.groups()
+        try:
+            metrics[name + (labels or "")] = float(value)
+        except ValueError:
+            continue
+    return metrics
+
+
+def parse_slots(data):
+    """Summarize gufo's `/slots` JSON (already decoded) as a list of dicts, one per session.
+
+    Each has `id`, `busy` (bool), `n_ctx`, `prompt_tokens` and `decoded` (tokens generated so far in the
+    current request). A field gufo did not send is `None`; an entry that is not a JSON object is skipped.
+    """
+    if not isinstance(data, list):
+        return []
+    slots = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        next_token = entry.get("next_token")
+        maybe_first = next_token[0] if isinstance(next_token, list) and next_token else None
+        slots.append({"id": entry.get("id"),
+                      "busy": bool(entry.get("is_processing", False)),
+                      "n_ctx": entry.get("n_ctx"),
+                      "prompt_tokens": entry.get("n_prompt_tokens"),
+                      "decoded": maybe_first.get("n_decoded") if isinstance(maybe_first, dict) else None})
+    return slots
+
+
+# `2026-11-18 08:56:50 [INFO] [http] key=value key=value ...`. gufo writes the timestamp in UTC.
+_LOG_LINE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\s+\[(\w+)\]\s+\[([\w.-]+)\]\s+(.*)$")
+_FIELD = re.compile(r"(\w+)=(\S+)")
+
+
+def _number_or_string(text):
+    for convert in (int, float):
+        try:
+            return convert(text)
+        except ValueError:
+            pass
+    return text
+
+
+def parse_log_line(line):
+    """Parse one gufo log line into a dict, or return `None` if it is not in gufo's key=value format.
+
+    The dict holds `time` (an aware UTC `datetime`), `level`, `component`, and every `key=value` field,
+    with values converted to `int` or `float` where they look like numbers.
+    """
+    match = _LOG_LINE.match(line.strip())
+    if match is None:
+        return None
+    stamp, level, component, rest = match.groups()
+    try:
+        time = datetime.datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.UTC)
+    except ValueError:
+        return None
+    record = {key: _number_or_string(value) for key, value in _FIELD.findall(rest)}
+    record.update(time=time, level=level, component=component)
+    return record
+
+
+def completed_request(line):
+    """Return the parsed record if `line` is a finished chat or completion request, else `None`.
+
+    That is an `[http]` line with `event=completed` whose path ends in `/completions`: the requests with
+    token counts and speeds, as opposed to health checks and model listings.
+    """
+    record = parse_log_line(line)
+    if record is None or record["component"] != "http" or record.get("event") != "completed":
+        return None
+    path = record.get("path")
+    if not isinstance(path, str) or not path.endswith("/completions"):
+        return None
+    return record

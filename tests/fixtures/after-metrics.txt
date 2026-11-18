@@ -1,0 +1,17 @@
+gufo_device_lost_total 0
+llamacpp:prompt_tokens_total 72
+llamacpp:prompt_tokens_cached_total 0
+llamacpp:prompt_seconds_total 0.40418535
+llamacpp:tokens_predicted_total 1200
+llamacpp:tokens_predicted_seconds_total 61.229611328999994
+llamacpp:n_tokens_max 424
+llamacpp:spec_decode_num_drafts_total 336
+llamacpp:spec_decode_num_draft_tokens_total 882
+llamacpp:spec_decode_num_accepted_tokens_total 396
+gufo_spec_lookup_tokens_total 0
+gufo_spec_lookup_accepted_tokens_total 0
+llamacpp:prompt_tokens_seconds 189.01861096145387
+llamacpp:predicted_tokens_seconds 17.894930341682358
+llamacpp:requests_processing 0
+llamacpp:requests_deferred 0
+llamacpp:kv_cache_usage_ratio 0
