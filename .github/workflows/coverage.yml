@@ -1,0 +1,59 @@
+# Measure test coverage on pushes and upload the report to Codecov.
+
+name: Coverage
+
+on:
+  push:
+    # Every branch, so work in progress gets the same coverage run as `main` does.
+    # Dependabot's are the exception: GitHub hands its runs Dependabot secrets rather than Actions
+    # secrets, so `CODECOV_TOKEN` would be empty and the upload would fail on every bump. A bump's
+    # coverage run is the one that happens on `main` after it merges.
+    branches-ignore: ['dependabot/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codecov:
+    # Upstream only. A fork runs this on its own pushes with no `CODECOV_TOKEN` of its own, and
+    # Codecov wants one for a permanent branch even on a public repo, so without this the workflow
+    # greets every contributor with a red run about a secret they were never meant to hold.
+    if: github.repository == 'Technologicat/m97'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        # The newest Python the project supports, i.e. the top of the CI matrix —
+        # that is where new-syntax code paths actually run. Bump this whenever the
+        # matrix grows; nothing else will remind you.
+        python-version: "3.15"
+        # Lets a Python at alpha/beta/rc resolve: the setup-python manifest marks
+        # prereleases unstable, so without this a bare version such as "3.16" resolves
+        # to nothing. A no-op wherever a stable release exists, so it stays in for good
+        # rather than being added and removed around each new Python.
+        allow-prereleases: true
+    - name: Install PDM
+      run: |
+        python -m pip install --upgrade pip
+        pip install pdm
+    - name: Install dependencies
+      run: |
+        # Point PDM at the interpreter `setup-python` already installed, rather than
+        # letting it fetch a second one — its index has no prerelease build, so asking
+        # for a version like "3.15" fails while that very interpreter is on PATH.
+        pdm use -f "$(python -c 'import sys; print(sys.executable)')"
+        pdm install
+    - name: Generate coverage report
+      run: |
+        pdm run coverage run -m pytest tests/
+        pdm run coverage xml
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.xml
+        flags: unittests

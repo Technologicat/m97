@@ -1,0 +1,118 @@
+[project]
+name = "m97"
+version = "0.1.0.dev0"
+description = "A web dashboard and control panel for a gufo LLM server on AMD Strix Halo."
+authors = [{ name = "Juha Jeronen", email = "juha.jeronen@jamk.fi" }]
+readme = "README.md"
+license = "BSD-2-Clause"
+license-files = ["LICENSE.md"]
+requires-python = ">=3.11"
+keywords = [
+    "gufo",
+    "llm",
+    "strix-halo",
+    "dashboard",
+    "podman",
+    "nicegui",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: System :: Monitoring",
+]
+dependencies = [
+    "nicegui>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Technologicat/m97"
+Repository = "https://github.com/Technologicat/m97"
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm.build]
+includes = ["m97/"]
+
+[dependency-groups]
+dev = [
+    # Test
+    "pytest>=8.0",
+    "coverage",                # `coverage run -m pytest` / `coverage xml` for CI's coverage workflow
+    "pip",                     # ensures `python -m pip` works in the venv
+
+    # Linters (for local checks — CI also installs them separately)
+    "ruff>=0.14.0",
+    "pycodestyle",             # continuation-line indentation, which ruff does not check
+    "flake8",                  # Emacs flycheck
+    "autopep8",                # autoformat on save (Emacs)
+
+    # Editor tooling (jedi-based IDE features in Emacs)
+    "jedi>=0.19.2",
+    "epc",                     # Emacs <-> Python RPC
+    "importmagic",             # auto-import suggestions
+
+    # Release and CI-workflow tooling
+    "build",                   # `python -m build --sdist` for pre-release sanity checks
+    "pyyaml>=6.0.3",           # validate .github/workflows/*.yml from the dev venv
+
+    # Diagnostics
+    "py-spy",                  # sampling profiler; attaches to a *running* process, no instrumentation
+]
+
+[tool.coverage.run]
+source = ["m97"]       # measure production code only — not the tests themselves
+branch = true          # branch coverage (recommended by codecov.io)
+omit = ["*/tests/*"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "00_stuff",                # local non-tracked scratch area
+    "lint_canary_fixture.py",  # deliberate violations; linted only by scripts/check_lint_canary.py
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "SIM"]
+ignore = [
+    # pycodestyle
+    "E203",   # whitespace before ':' — needed for slice alignment
+    "E265",   # block comment should start with '# ' — commented-out code, markers
+    "E301",   # expected 1 blank line — blank lines are semantic paragraph breaks
+    "E302",   # expected 2 blank lines before def — same
+    "E305",   # expected 2 blank lines after end — same
+    "E306",   # expected blank line before nested def — same
+    "E402",   # module level import not at top — conditional/deferred imports
+    "E501",   # line too long — advisory, not enforced
+    "E731",   # lambda assignment — closures are idiomatic in this codebase
+    # flake8-simplify
+    "SIM102",  # collapsible if — nested ifs often represent distinct semantic guards
+    # Note: SIM103 (return condition directly) is intentionally NOT ignored here.
+    # It is enabled as an advisory — CI runs it in a non-failing second pass.
+    "SIM105",  # contextlib.suppress — try/except/pass is more flexible and explicit
+    "SIM108",  # ternary instead of if/else — often less readable, no real gain
+    "SIM114",  # combine if branches — match-casing style; autofix would damage semantics
+    "SIM117",  # combine with statements — nesting shows parent/child relationships
+    "SIM118",  # in-dict-keys — explicit .keys() marks the variable as a dictlike
+    "SIM300",  # yoda conditions — natural reading order preferred
+    "SIM910",  # dict.get with None default — explicit None documents programmer intent
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]  # re-exports via star-import

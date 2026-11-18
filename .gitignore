@@ -1,0 +1,32 @@
+# Local scratch area
+00_stuff/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# PDM
+.pdm-python
+.pdm-build/
+# local dev interpreter pin; lockfile + requires-python cover reproducibility
+.python-version
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Playwright MCP's screenshots and page snapshots, from checking the page in a browser
+.playwright-mcp/
+
+# NiceGUI's per-run storage
+.nicegui/
