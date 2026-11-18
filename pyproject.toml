@@ -37,6 +37,9 @@ dependencies = [
 Homepage = "https://github.com/Technologicat/m97"
 Repository = "https://github.com/Technologicat/m97"
 
+[project.scripts]
+m97 = "m97.cli:main"
+
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"

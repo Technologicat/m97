@@ -16,7 +16,7 @@ import urllib.request
 
 __all__ = ["Service", "gufo_service", "openwebui_service",
            "gufo_run_args", "openwebui_run_args",
-           "run", "container_state", "start", "stop",
+           "run", "container_state", "answers", "start", "stop",
            "follow_events", "EVENT_STATES",
            "derive_status"]
 
@@ -112,6 +112,10 @@ async def run(*args, timeout=60):
         proc.kill()
         await proc.wait()
         return 124, "", f"{args[0]}: timed out after {timeout} s"
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            proc.kill()
+        raise
     return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
 
@@ -126,7 +130,8 @@ async def _remove(name, *, run):
     await run("podman", "rm", "-f", name, timeout=30)
 
 
-def _ready(url):
+def answers(url):
+    """Whether `url` answers 200 within a second."""
     try:
         with urllib.request.urlopen(url, timeout=1) as response:
             return response.status == 200
@@ -141,7 +146,7 @@ async def start(service, *, lan, run=run, ready=None, clock=time.monotonic, poll
     the message carries its last log lines; if the wait times out, the container is left running, since
     it may only be slow (a cold start reads the whole model from disk).
     """
-    is_ready = ready or (lambda: asyncio.to_thread(_ready, service.ready_url))
+    is_ready = ready or (lambda: asyncio.to_thread(answers, service.ready_url))
     state = await container_state(service.container, run=run)
     if state == "running":
         return f"{service.title} is already running."
