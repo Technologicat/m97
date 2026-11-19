@@ -263,7 +263,8 @@ def build(hub):
             sessions_label.text = " · ".join(part for part in (
                 f"{len(busy_slots)} of {len(hub.slots)} sessions busy" if hub.slots else "",
                 f"{deferred:.0f} waiting" if deferred else "",
-                f"fullest context {100 * max(fills):.0f} %" if fills else "") if part)
+                # One decimal below 10 %, where whole percents would read "0 %" for a session that is busy.
+                f"fullest context {100 * max(fills):.{1 if max(fills) < 0.1 else 0}f} %" if fills else "") if part)
 
             speed_label.text = _fmt(hub.gen_tps, ".1f", " tok/s") if hub.ready["gufo"] else "–"
             live = [slot["tps"] for slot in hub.slots if slot["busy"] and slot["tps"] is not None]
