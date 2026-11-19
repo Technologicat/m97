@@ -6,6 +6,10 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
 
 ---
 
+## 0.1.1 (in progress)
+
+*No user-visible changes yet.*
+
 ## 0.1.0 — Night watch — 2026-11-19
 
 Initial release.

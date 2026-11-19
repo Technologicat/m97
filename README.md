@@ -2,6 +2,8 @@
 
 ![CI status](https://img.shields.io/github/actions/workflow/status/Technologicat/m97/ci.yml?branch=main)
 [![codecov](https://codecov.io/gh/Technologicat/m97/branch/main/graph/badge.svg)](https://codecov.io/gh/Technologicat/m97)
+![version on PyPI](https://img.shields.io/pypi/v/m97)
+![supported Python versions](https://img.shields.io/pypi/pyversions/m97)
 ![license](https://img.shields.io/github/license/Technologicat/m97)
 
 A web dashboard and control panel for a [gufo](https://github.com/gufo-org/gufo) LLM server on AMD Strix
@@ -40,10 +42,11 @@ For my stance on AI contributions, see the [collaboration guidelines](https://gi
 ## Install and uninstall
 
 ```bash
-pipx install git+https://github.com/Technologicat/m97
+pipx install m97
 ```
 
-That puts the `m97` command on your `PATH`. To update, `pipx upgrade m97`, then `m97 install` again if you
+That puts the `m97` command on your `PATH`. For the development version instead, `pipx install
+git+https://github.com/Technologicat/m97`. To update, `pipx upgrade m97`, then `m97 install` again if you
 run it as a service (see below), so the service picks up the new version.
 
 To uninstall, remove the service first if you installed one, then the software:
