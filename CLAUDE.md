@@ -8,7 +8,7 @@ Guidance for Claude Code working in this repository. Fleet-wide conventions live
 A web dashboard and control panel for a gufo LLM server on AMD Strix Halo: what the machine and the model
 are doing, and buttons to start and stop gufo and Open WebUI, for people who never open a shell. Built for
 the fleet's local AI server, and public because other gufo users may want it. The README is the user's
-manual; [`briefs/dashboard.md`](briefs/dashboard.md) records the design and the decisions behind it.
+manual; [`briefs/done/dashboard.md`](briefs/done/dashboard.md) records the design and the decisions behind it.
 
 The package, `m97/`:
 

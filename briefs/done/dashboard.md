@@ -1,5 +1,31 @@
 # Brief: m97, a web dashboard and control panel for a gufo server
 
+## What shipped (2026-11-19)
+
+**Done**, as m97 v1, built on 2026-11-18 and 19. The rest of this brief is the plan as it was written, kept
+for the reasoning; what m97 does now is described in the README, and how to work on it in `CLAUDE.md`.
+
+- **Built as planned:** every panel and data source below, the start/stop buttons with live status, the
+  access rule, the systemd user service with lingering, and port 8097. Decisions taken during the work are
+  under "Decided in the first session".
+- **Done differently:**
+  - m97 runs the containers itself, from its settings, instead of calling dotclaude's wrappers.
+  - Container state comes from `podman events` and the network from `nmcli monitor`, so m97 starts no
+    processes on a timer.
+- **Added along the way:**
+  - Autostart of the services that were left running, after the network is up, gufo first; and crash
+    reports that survive a restart, with no automatic restarts.
+  - The `m97` verbs: `serve`, `install`, `uninstall`, `start`, `stop`, `status`, `logs`.
+  - Live per-session generation speed; session bars filled by context use, for spotting runaway
+    requests; the delivered speed of each request beside gufo's decoding speed.
+  - Separate CPU and GPU cards with level load sparklines, and a per-core CPU view grouped by physical
+    core.
+  - Each service's address and whether it listens on all interfaces; dark mode, remembered per viewer.
+- **Two bugs worth knowing about**, both fixed and described in `CLAUDE.md`: under uvloop, reading the
+  output of `podman run -d` to its end waited for the container to exit; and restarting m97 stopped the
+  containers it had started, until each was given a scope of its own.
+- **Left open:** the phone hotspot's connection UUID, for the local settings once it has been joined.
+
 [gufo](https://github.com/gufo-org/gufo) is an inference engine for AMD Strix Halo (Ryzen AI Max+, Radeon
 8060S, gfx1151). The maintainer runs it on a Strix Halo mini PC, the fleet's local AI server, which will
 run mostly headless and serve LLMs to the other machines on the LAN. The desktop's system-monitor applet

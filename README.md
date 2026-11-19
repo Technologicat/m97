@@ -215,7 +215,7 @@ pdm install          # creates .venv, installs m97 editable with the dev tools
 pdm run pytest tests/
 ```
 
-The design, and the decisions behind it, are in [`briefs/dashboard.md`](briefs/dashboard.md).
+The design, and the decisions behind it, are in [`briefs/done/dashboard.md`](briefs/done/dashboard.md).
 
 ## License
 
