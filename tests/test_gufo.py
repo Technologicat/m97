@@ -75,6 +75,17 @@ def test_slots_busy():
     assert [slot["busy"] for slot in slots] == [True, True, True]
     assert [slot["decoded"] for slot in slots][:2] == [73, 88]
     assert slots[0]["prompt_tokens"] == 24
+    assert slots[0]["fill"] == pytest.approx((24 + 73) / 262144)
+
+
+def test_slots_fill_needs_every_field():
+    data = fixture_json("busy-slots.json")
+    del data[0]["n_prompt_tokens"]
+    data[1]["n_ctx"] = 0
+    slots = parse_slots(data)
+    assert slots[0]["fill"] is None
+    assert slots[1]["fill"] is None
+    assert slots[2]["fill"] is not None
 
 
 def test_slots_missing_fields():
@@ -141,7 +152,7 @@ def test_log_unparseable(line):
 # Live speed per session
 
 def slot(sid, busy, decoded):
-    return {"id": sid, "busy": busy, "n_ctx": 262144, "prompt_tokens": 24, "decoded": decoded}
+    return {"id": sid, "busy": busy, "n_ctx": 262144, "prompt_tokens": 24, "decoded": decoded, "fill": None}
 
 
 def test_slot_rates():

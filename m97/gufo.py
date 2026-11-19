@@ -51,8 +51,10 @@ def parse_metrics(text):
 def parse_slots(data):
     """Summarize gufo's `/slots` JSON (already decoded) as a list of dicts, one per session.
 
-    Each has `id`, `busy` (bool), `n_ctx`, `prompt_tokens` and `decoded` (tokens generated so far in the
-    current request). A field gufo did not send is `None`; an entry that is not a JSON object is skipped.
+    Each has `id`, `busy` (bool), `n_ctx`, `prompt_tokens`, `decoded` (tokens generated so far in the
+    current request) and `fill`, the share of the session's context in use, from 0 to 1. A field gufo did not
+    send is `None`, as is `fill` when a field it needs is missing; an entry that is not a JSON object is
+    skipped.
     """
     if not isinstance(data, list):
         return []
@@ -62,11 +64,18 @@ def parse_slots(data):
             continue
         next_token = entry.get("next_token")
         maybe_first = next_token[0] if isinstance(next_token, list) and next_token else None
+        n_ctx, prompt, decoded = (entry.get("n_ctx"), entry.get("n_prompt_tokens"),
+                                  maybe_first.get("n_decoded") if isinstance(maybe_first, dict) else None)
+        # `n_prompt_tokens` is the whole prompt, the part reused from the prompt cache included (6,509 tokens
+        # both computed fresh and fully cached, on gufo 0.34.0), so prompt plus generated is what the
+        # context holds.
+        numbers = all(isinstance(x, (int, float)) for x in (n_ctx, prompt, decoded))
         slots.append({"id": entry.get("id"),
                       "busy": bool(entry.get("is_processing", False)),
-                      "n_ctx": entry.get("n_ctx"),
-                      "prompt_tokens": entry.get("n_prompt_tokens"),
-                      "decoded": maybe_first.get("n_decoded") if isinstance(maybe_first, dict) else None})
+                      "n_ctx": n_ctx,
+                      "prompt_tokens": prompt,
+                      "decoded": decoded,
+                      "fill": min(1.0, (prompt + decoded) / n_ctx) if numbers and n_ctx > 0 else None})
     return slots
 
 

@@ -238,13 +238,31 @@ def build(hub):
                         with ui.element("div").classes("h-3 flex-1 rounded") as bar:
                             session_bars.append((bar, ui.tooltip()))
             for (bar, tip), slot in zip(session_bars, hub.slots):
-                bar.style(f"background: {'#7c6cf0' if slot['busy'] else 'rgba(128,128,128,.25)'}")
-                tip.text = (f"session {slot['id']}: generating at {_fmt(slot['tps'], '.1f', ' tok/s')}, "
-                            f"{slot['decoded']} tokens so far" if slot["busy"] else f"session {slot['id']}: idle")
-            busy_slots = sum(1 for s in hub.slots if s["busy"])
+                # A busy session's bar is filled as far as its context is: a request running away in a loop
+                # shows as a bar creeping across.
+                if not slot["busy"]:
+                    background = "rgba(128,128,128,.25)"
+                elif slot["fill"] is None:
+                    background = "#7c6cf0"
+                else:
+                    edge = max(2.0, 100 * slot["fill"])   # a sliver even when nearly empty, to read as busy
+                    background = f"linear-gradient(to right, #7c6cf0 {edge:.1f}%, rgba(124,108,240,.3) {edge:.1f}%)"
+                bar.style(f"background: {background}")
+                if slot["busy"]:
+                    used = (slot["prompt_tokens"] or 0) + (slot["decoded"] or 0)
+                    tip.text = (f"session {slot['id']}: generating at {_fmt(slot['tps'], '.1f', ' tok/s')}; "
+                                f"context {used:,} of {_fmt(slot['n_ctx'], ',')} tokens "
+                                f"({_fmt(None if slot['fill'] is None else 100 * slot['fill'], '.1f', ' %')}), "
+                                f"{_fmt(slot['decoded'], ',')} generated")
+                else:
+                    tip.text = f"session {slot['id']}: idle"
+            busy_slots = [s for s in hub.slots if s["busy"]]
+            fills = [s["fill"] for s in busy_slots if s["fill"] is not None]
             deferred = hub.metrics.get("llamacpp:requests_deferred") or 0
-            sessions_label.text = (f"{busy_slots} of {len(hub.slots)} sessions busy"
-                                   + (f", {deferred:.0f} waiting" if deferred else "")) if hub.slots else ""
+            sessions_label.text = " · ".join(part for part in (
+                f"{len(busy_slots)} of {len(hub.slots)} sessions busy" if hub.slots else "",
+                f"{deferred:.0f} waiting" if deferred else "",
+                f"fullest context {100 * max(fills):.0f} %" if fills else "") if part)
 
             speed_label.text = _fmt(hub.gen_tps, ".1f", " tok/s") if hub.ready["gufo"] else "–"
             live = [slot["tps"] for slot in hub.slots if slot["busy"] and slot["tps"] is not None]
@@ -260,8 +278,8 @@ def build(hub):
             s = hub.latest
             power_label.text = _fmt(s.get("ppt_w"), ".1f", " W")
             temp_label.text = f"CPU {_fmt(s.get('cpu_temp_c'), '.0f', ' °C')} · GPU {_fmt(s.get('gpu_temp_c'), '.0f', ' °C')}"
-            cpu_load_label.text = f"CPU {_fmt(s.get('cpu_busy_pct'), '.0f', ' %')}"
-            gpu_load_label.text = f"GPU {_fmt(s.get('gpu_busy_pct'), '.0f', ' %')}"
+            cpu_load_label.text = _fmt(s.get("cpu_busy_pct"), ".0f", " %")
+            gpu_load_label.text = _fmt(s.get("gpu_busy_pct"), ".0f", " %")
             gpu_label.text = f"clock {_fmt(s.get('gpu_mhz'), '.0f', ' MHz')}"
             ram_used, ram_total = s.get("ram_used_gib"), s.get("ram_total_gib")
             ram_label.text = f"RAM {_fmt(ram_used, '.1f')} of {_fmt(ram_total, '.0f', ' GiB')}"
