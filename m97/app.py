@@ -116,26 +116,16 @@ def build(hub):
                     power_chart = ui.echart(_spark("W", "#e8833a")).classes("w-full h-16")
                     temp_label = ui.label().classes("text-sm opacity-70")
 
+                # CPU and GPU start alike, a readout over a load sparkline of the same height and scale, so the
+                # two sparklines sit level across the row and the same height means the same load in both.
                 with ui.card().props("flat bordered"):
-                    ui.label("GPU and CPU").classes("text-base font-medium")
-                    load_label = ui.label().classes("text-xl")
-                    load_chart = ui.echart(_spark("GPU %", "#2f9e72", max_value=100)).classes("w-full h-16")
-                    cpu_label = ui.label().classes("text-sm opacity-70")
-
-                with ui.card().props("flat bordered"):
-                    ui.label("Memory").classes("text-base font-medium")
-                    ram_label = ui.label().classes("text-sm")
-                    ram_bar = ui.linear_progress(show_value=False).props("rounded size=10px")
-                    gtt_label = ui.label().classes("text-sm mt-2")
-                    gtt_bar = ui.linear_progress(show_value=False, color="secondary").props("rounded size=10px")
-
-                with ui.card().props("flat bordered"):
-                    ui.label("CPU cores").classes("text-base font-medium")
-                    threads_label = ui.label().classes("text-sm opacity-70")
+                    ui.label("CPU").classes("text-base font-medium")
+                    cpu_load_label = ui.label().classes("text-xl")
+                    cpu_chart = ui.echart(_spark("CPU %", "#3b9ede", max_value=100)).classes("w-full h-16")
                     # One column per physical core, holding a bar per hardware thread of that core; 16 columns
                     # to a row.
-                    thread_bars = {}   # CPU number -> (fill, tooltip)
-                    with ui.element("div").classes("w-full mt-2 grid gap-x-[3px] gap-y-2").style(
+                    thread_bars = {}   # CPU number -> (fill, tooltip, core)
+                    with ui.element("div").classes("w-full grid gap-x-[3px] gap-y-2").style(
                             f"grid-template-columns: repeat({min(16, len(hub.cpu_cores)) or 1}, minmax(0, 1fr))"):
                         for core, threads in enumerate(hub.cpu_cores):
                             with ui.element("div").classes("flex flex-col gap-[2px]"):
@@ -145,6 +135,20 @@ def build(hub):
                                         fill = ui.element("div").classes("absolute bottom-0 left-0 right-0").style(
                                             "background: #3b9ede; height: 0%")
                                         thread_bars[cpu] = (fill, ui.tooltip(), core)
+                    cpu_label = ui.label().classes("text-sm opacity-70 mt-auto")
+
+                with ui.card().props("flat bordered"):
+                    ui.label("GPU").classes("text-base font-medium")
+                    gpu_load_label = ui.label().classes("text-xl")
+                    gpu_chart = ui.echart(_spark("GPU %", "#2f9e72", max_value=100)).classes("w-full h-16")
+                    gpu_label = ui.label().classes("text-sm opacity-70 mt-auto")
+
+                with ui.card().props("flat bordered"):
+                    ui.label("Memory").classes("text-base font-medium")
+                    ram_label = ui.label().classes("text-sm")
+                    ram_bar = ui.linear_progress(show_value=False).props("rounded size=10px")
+                    gtt_label = ui.label().classes("text-sm mt-2")
+                    gtt_bar = ui.linear_progress(show_value=False, color="secondary").props("rounded size=10px")
 
             # ---- Recent requests
             with ui.card().props("flat bordered").classes("w-full"):
@@ -256,9 +260,9 @@ def build(hub):
             s = hub.latest
             power_label.text = _fmt(s.get("ppt_w"), ".1f", " W")
             temp_label.text = f"CPU {_fmt(s.get('cpu_temp_c'), '.0f', ' °C')} · GPU {_fmt(s.get('gpu_temp_c'), '.0f', ' °C')}"
-            load_label.text = f"GPU {_fmt(s.get('gpu_busy_pct'), '.0f', ' %')}"
-            cpu_label.text = (f"CPU {_fmt(s.get('cpu_busy_pct'), '.0f', ' %')} · GPU clock "
-                              f"{_fmt(s.get('gpu_mhz'), '.0f', ' MHz')} · load {_fmt(s.get('load1'), '.2f')}")
+            cpu_load_label.text = f"CPU {_fmt(s.get('cpu_busy_pct'), '.0f', ' %')}"
+            gpu_load_label.text = f"GPU {_fmt(s.get('gpu_busy_pct'), '.0f', ' %')}"
+            gpu_label.text = f"clock {_fmt(s.get('gpu_mhz'), '.0f', ' MHz')}"
             ram_used, ram_total = s.get("ram_used_gib"), s.get("ram_total_gib")
             ram_label.text = f"RAM {_fmt(ram_used, '.1f')} of {_fmt(ram_total, '.0f', ' GiB')}"
             ram_bar.value = ram_used / ram_total if ram_used is not None and ram_total else 0
@@ -272,11 +276,14 @@ def build(hub):
                 fill.style(f"background: #3b9ede; height: {0 if pct is None else min(100.0, pct):.0f}%")
                 tip.text = f"core {core}, CPU {cpu}: {_fmt(pct, '.0f', ' %')}"
             busy = [pct for pct in per_thread.values() if pct is not None]
-            threads_label.text = (f"{len(hub.cpu_cores)} cores, {len(per_thread)} threads · busiest {max(busy):.0f} % · "
-                                  f"average {sum(busy) / len(busy):.0f} %") if busy else ""
+            cpu_label.text = " · ".join(part for part in (
+                f"{len(hub.cpu_cores)} cores, {len(per_thread)} threads" if per_thread else "",
+                f"busiest {max(busy):.0f} %" if busy else "",
+                f"load {_fmt(s.get('load1'), '.2f')}") if part)
 
             now = time.monotonic()
-            for chart, series in ((speed_chart, "gen_tps"), (power_chart, "ppt_w"), (load_chart, "gpu_busy_pct")):
+            for chart, series in ((speed_chart, "gen_tps"), (power_chart, "ppt_w"), (cpu_chart, "cpu_busy_pct"),
+                                  (gpu_chart, "gpu_busy_pct")):
                 chart.options["xAxis"]["min"] = -hub.settings["history"]["seconds"]
                 chart.options["xAxis"]["max"] = 0
                 chart.options["series"][0]["data"] = [[round(t - now, 1), values[series]]
