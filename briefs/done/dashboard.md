@@ -24,7 +24,7 @@ for the reasoning; what m97 does now is described in the README, and how to work
 - **Two bugs worth knowing about**, both fixed and described in `CLAUDE.md`: under uvloop, reading the
   output of `podman run -d` to its end waited for the container to exit; and restarting m97 stopped the
   containers it had started, until each was given a scope of its own.
-- **Left open:** the phone hotspot's connection UUID, for the local settings once it has been joined.
+- **Nothing left open.** The phone hotspot joined the trusted networks in the local settings the same day.
 
 [gufo](https://github.com/gufo-org/gufo) is an inference engine for AMD Strix Halo (Ryzen AI Max+, Radeon
 8060S, gfx1151). The maintainer runs it on a Strix Halo mini PC, the fleet's local AI server, which will
