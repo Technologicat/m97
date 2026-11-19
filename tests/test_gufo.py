@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from m97.gufo import completed_request, parse_log_line, parse_metrics, parse_slots, with_slot_rates
+from m97.gufo import completed_request, output_tps, parse_log_line, parse_metrics, parse_slots, with_slot_rates
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -165,3 +165,20 @@ def test_slot_rates():
     slots, previous = with_slot_rates([slot(0, False, None), slot(1, True, 25), slot(2, False, None)], previous, 12.0)
     assert slots[0]["tps"] is None and 0 not in previous, "an idle session forgets its count"
     assert slots[1]["tps"] == pytest.approx(20.0)
+
+
+# --------------------------------------------------------------------------------
+# Delivered generation speed
+
+def test_output_tps_is_wall_clock_from_first_token():
+    lines = fixture_text("gufo-log.txt").splitlines()
+    record = next(r for r in map(completed_request, lines) if r is not None and r["request"] == "r349")
+    # 400 tokens over 19664.6 - 283.3 ms; gufo logged decode_tps=20.8 for the same request
+    assert output_tps(record) == pytest.approx(400 / ((19664.6 - 283.3) / 1000))
+
+
+@pytest.mark.parametrize("record", [{}, {"generated_tokens": 10, "duration_ms": 100.0},
+                                    {"generated_tokens": 10, "duration_ms": 100.0, "ttft_ms": 100.0},
+                                    {"generated_tokens": "x", "duration_ms": 100.0, "ttft_ms": 1.0}])
+def test_output_tps_missing_or_degenerate(record):
+    assert output_tps(record) is None

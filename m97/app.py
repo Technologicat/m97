@@ -6,7 +6,7 @@ import time
 
 from nicegui import app, ui
 
-from . import access
+from . import access, gufo
 
 __all__ = ["build"]
 
@@ -155,7 +155,8 @@ def build(hub):
                 ui.label("Recent requests").classes("text-base font-medium")
                 columns = [{"name": "time", "label": "Time", "field": "time", "align": "left"},
                            {"name": "tokens", "label": "Prompt → generated", "field": "tokens", "align": "right"},
-                           {"name": "decode", "label": "Generation", "field": "decode", "align": "right"},
+                           {"name": "output", "label": "Generation", "field": "output", "align": "right"},
+                           {"name": "decode", "label": "Decoding", "field": "decode", "align": "right"},
                            {"name": "prefill", "label": "Prefill", "field": "prefill", "align": "right"},
                            {"name": "ttft", "label": "First token", "field": "ttft", "align": "right"},
                            {"name": "duration", "label": "Duration", "field": "duration", "align": "right"},
@@ -270,7 +271,8 @@ def build(hub):
             live_label.visible = bool(live)
             if hub.requests:
                 last = hub.requests[-1]
-                last_label.text = (f"Last request: {_fmt(last.get('decode_tps'), '.1f')} tok/s generation, "
+                last_label.text = (f"Last request: {_fmt(gufo.output_tps(last), '.1f')} tok/s generation "
+                                   f"({_fmt(last.get('decode_tps'), '.1f')} decoding), "
                                    f"{_fmt(last.get('prefill_tps'), '.0f')} tok/s prefill")
             else:
                 last_label.text = ""
@@ -310,9 +312,10 @@ def build(hub):
 
             table.rows = [{"id": r.get("request", i),
                            "time": r["time"].astimezone().strftime("%H:%M:%S"),
-                           "tokens": f"{_fmt(r.get('prompt_tokens'), 'd')} → {_fmt(r.get('generated_tokens'), 'd')}",
+                           "tokens": f"{_fmt(r.get('prompt_tokens'), ',d')} → {_fmt(r.get('generated_tokens'), ',d')}",
+                           "output": _fmt(gufo.output_tps(r), ".1f", " tok/s"),
                            "decode": _fmt(r.get("decode_tps"), ".1f", " tok/s"),
-                           "prefill": _fmt(r.get("prefill_tps"), ".0f", " tok/s"),
+                           "prefill": _prefill_cell(r),
                            "ttft": _fmt(_ms_to_s(r.get("ttft_ms")), ".2f", " s"),
                            "duration": _fmt(_ms_to_s(r.get("duration_ms")), ".1f", " s"),
                            "finish": str(r.get("finish", "–"))}
@@ -337,3 +340,11 @@ def build(hub):
 
 def _ms_to_s(value):
     return value / 1000 if isinstance(value, (int, float)) else None
+
+
+def _prefill_cell(record):
+    """Prefill speed for the recent-requests table, or "cached" when the whole prompt came from the cache."""
+    prompt, cached = record.get("prompt_tokens"), record.get("cached_tokens")
+    if isinstance(prompt, int) and isinstance(cached, int) and prompt > 0 and cached >= prompt:
+        return "cached"
+    return _fmt(record.get("prefill_tps"), ".0f", " tok/s")

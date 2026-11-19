@@ -10,7 +10,7 @@ import re
 
 __all__ = ["parse_metrics",
            "parse_slots", "with_slot_rates",
-           "parse_log_line", "completed_request"]
+           "parse_log_line", "completed_request", "output_tps"]
 
 # What the metrics mean, as observed on gufo 0.34.0 (2026-11-18), three concurrent chat requests:
 #
@@ -147,3 +147,16 @@ def completed_request(line):
     if not isinstance(path, str) or not path.endswith("/completions"):
         return None
     return record
+
+
+def output_tps(record):
+    """The generation speed a finished request delivered: tokens generated over the wall-clock time from the
+    first token to the end, from a `completed_request` record. `None` if a field it needs is missing.
+    """
+    # gufo's own `decode_tps` differs when requests overlap: on gufo 0.34.0, 838 tokens over 92.7 s beside a
+    # long prefill came to 9.0 tok/s, against a logged `decode_tps` of 40.4, which would be 21 s of decoding.
+    # It appears to leave out the time a request waits while another session is served.
+    generated, duration, ttft = (record.get(k) for k in ("generated_tokens", "duration_ms", "ttft_ms"))
+    if not all(isinstance(x, (int, float)) for x in (generated, duration, ttft)) or duration <= ttft:
+        return None
+    return generated / ((duration - ttft) / 1000)
