@@ -9,7 +9,7 @@ Halo: what the machine and the model are doing — power, temperatures, memory, 
 speed, recent requests — and buttons to start and stop gufo and [Open WebUI](https://github.com/open-webui/open-webui),
 for the people in the household who never open a shell.
 
-![The m97 dashboard while gufo serves two chat requests](docs/media/dashboard.png)
+![The m97 dashboard while gufo serves two chat requests](https://raw.githubusercontent.com/Technologicat/m97/main/docs/media/dashboard.png)
 
 For my stance on AI contributions, see the [collaboration guidelines](https://github.com/Technologicat/substrate-independent/blob/main/collaboration.md).
 
@@ -118,7 +118,7 @@ who can reach it, and only the buttons are guarded (see [who can press the butto
 ## Configuration
 
 m97 reads its settings from **`~/.config/m97/settings.toml`**. The file is optional: without it, m97 runs
-on its defaults, which are in [`m97/settings.toml`](m97/settings.toml), each with a comment saying what it
+on its defaults, which are in [`m97/settings.toml`](https://github.com/Technologicat/m97/blob/main/m97/settings.toml), each with a comment saying what it
 does.
 
 Your file overrides the defaults key by key, so it only needs the keys you want to change. A table in your
@@ -215,8 +215,8 @@ pdm install          # creates .venv, installs m97 editable with the dev tools
 pdm run pytest tests/
 ```
 
-The design, and the decisions behind it, are in [`briefs/done/dashboard.md`](briefs/done/dashboard.md).
+The design, and the decisions behind it, are in [`briefs/done/dashboard.md`](https://github.com/Technologicat/m97/blob/main/briefs/done/dashboard.md).
 
 ## License
 
-BSD 2-Clause, see [`LICENSE.md`](LICENSE.md).
+BSD 2-Clause, see [`LICENSE.md`](https://github.com/Technologicat/m97/blob/main/LICENSE.md).
