@@ -1,7 +1,7 @@
 """The dashboard's data as one JSON-ready dict, and as text for `m97 report`.
 
-`snapshot` builds the payload `GET /api/status` serves, from the hub; `format_report` turns a payload back
-into a few lines of text. Both are pure: the first reads the hub and touches nothing else, the second reads
+`snapshot` builds the payload `GET /api/status` serves, from the hub, and `usage_report` the one of
+`GET /api/usage`; `format_report` turns a status payload back into a few lines of text. Both are pure: the first reads the hub and touches nothing else, the second reads
 only the payload, so `m97 report` can format what another machine's m97 sent.
 """
 
@@ -9,9 +9,9 @@ import datetime
 import socket
 import time
 
-from . import __version__, gufo, services
+from . import __version__, gufo, services, usage
 
-__all__ = ["SCHEMA", "snapshot", "format_report"]
+__all__ = ["SCHEMA", "snapshot", "usage_report", "format_report"]
 
 # The payload's shape. Bump when a key changes meaning or goes away; adding a key needs no bump.
 SCHEMA = 1
@@ -22,7 +22,8 @@ SCHEMA = 1
 DECIMALS = {"ppt_w": 1, "cpu_temp_c": 0, "gpu_temp_c": 0, "gpu_busy_pct": 0, "gpu_mhz": 0, "cpu_busy_pct": 0,
             "load1": 2, "ram_used_gib": 1, "ram_total_gib": 0, "gtt_used_gib": 1, "gtt_total_gib": 0,
             "gen_tps": 1, "tps": 1, "output_tps": 1, "decode_tps": 1, "prefill_tps": 0, "first_token_s": 2,
-            "duration_s": 1, "thread_pct": 0, "fill": 3}   # fill: a fraction, so 3 decimals is the page's 0.1 %
+            "duration_s": 1, "thread_pct": 0, "fill": 3,   # fill: a fraction, so 3 decimals is the page's 0.1 %
+            "hours": 1, "wh": 0}
 
 
 def _round(value, key):
@@ -55,6 +56,27 @@ def _request(record):
             "finish": record.get("finish")}
 
 
+def _usage_hours(summaries):
+    """Usage summaries (`usage.day_summary`), summed, in hours and Wh as the page shows them."""
+    def total(key):
+        return sum(s[key] for s in summaries)
+    names = (*usage.CATEGORIES, "m97_off", "gpu_other")
+    return {**{f"{name}_h": _round(total(f"{name}_s") / 3600, "hours") for name in names},
+            **{f"{name}_wh": _round(total(f"{name}_wh"), "wh") for name in (*usage.CATEGORIES, "gpu_other")}}
+
+
+def _usage_summaries(tally, days, now):
+    today = now.astimezone().date()
+    return [usage.day_summary(tally, today - datetime.timedelta(days=n), now=now) for n in range(days - 1, -1, -1)]
+
+
+def usage_report(tally, *, days=14, now=None):
+    """The payload of `GET /api/usage`: the last `days` days, oldest first, today included."""
+    now = now or datetime.datetime.now(datetime.UTC)
+    return {"schema": SCHEMA,
+            "days": [{"date": s["date"], **_usage_hours([s])} for s in _usage_summaries(tally, days, now)]}
+
+
 def snapshot(hub, *, history=False):
     """What the dashboard shows, as a JSON-ready dict; the README's "The data as JSON" lists the keys.
 
@@ -83,6 +105,8 @@ def snapshot(hub, *, history=False):
                      cpu_cores=hub.cpu_cores),
         "requests": [_request(r) for r in reversed(hub.requests)],
     }
+    week = _usage_summaries(hub.usage, 7, datetime.datetime.now(datetime.UTC))
+    payload["usage"] = {"today": _usage_hours(week[-1:]), "last_7_days": _usage_hours(week)}
     if hub.ready["gufo"]:
         props = hub.props or {}
         payload["model"] = {"name": props.get("model_alias") or props.get("model"),
@@ -161,6 +185,14 @@ def format_report(payload):
               f"{_fmt(max(threads) if threads else None, '.0f', ' %')}, load {_fmt(h.get('load1'), '.2f')}",
               f"memory      RAM {_fmt(h.get('ram_used_gib'), '.1f')} of {_fmt(h.get('ram_total_gib'), '.0f', ' GiB')}"
               f"   GTT {_fmt(h.get('gtt_used_gib'), '.1f')} of {_fmt(h.get('gtt_total_gib'), '.0f', ' GiB')}"]
+
+    if "usage" in payload:   # from an m97 older than 0.3.0, there is none
+        for label, hours in (("today", payload["usage"]["today"]), ("7 days", payload["usage"]["last_7_days"])):
+            lines.append(f"{'usage' if label == 'today' else '':<12}{label + ':':<8}" + ", ".join(
+                f"{title} {hours[key]:.1f} h" for title, key in
+                (("serving", "serving_h"), ("loaded idle", "idle_h"), ("loading", "loading_h"),
+                 ("stopped", "stopped_h"), ("m97 off", "m97_off_h"))) +
+                f"; other GPU use {hours['gpu_other_h']:.1f} h")
 
     for i, r in enumerate(payload["requests"][:5]):
         local = datetime.datetime.fromisoformat(r["time"].replace("Z", "+00:00")).astimezone()

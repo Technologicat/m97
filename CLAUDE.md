@@ -14,13 +14,15 @@ The package, `m97/`:
 
 - `cli.py`: the `m97` verbs (`serve`, `install`, `uninstall`, `start`, `stop`, `status`, `logs`, `report`);
   the systemd user unit is written by `install`.
-- `app.py`: the NiceGUI page, and the read-only `GET /api/status`. Both only read from the hub.
+- `app.py`: the NiceGUI page, and the read-only `GET /api/status` and `GET /api/usage`. Both only read from the hub.
 - `report.py`: the hub's state as the JSON payload (`snapshot`), and that payload as text for `m97 report`.
 - `hub.py`: the one shared view of the machine: the sampling loop, gufo's HTTP endpoints, gufo's log,
   podman events, `nmcli monitor`, history, actions, autostart and crash reports.
 - `services.py`: the podman command lines, start and stop, the event follower, where a service listens.
 - `gufo.py`: parsers for gufo's metrics, `/slots` and log lines, plus the derived speeds.
 - `sensors.py`: the sysfs and procfs sampler, and the CPU topology.
+- `usage.py`: the per-day tally of how the time is spent: the category of a sample, the accounting, the file,
+  and a day's summary with m97 off. The hub counts each sample; `report.usage_report` serves `/api/usage`.
 - `access.py`: the trusted-network and PIN rule. `intent.py`: which services should run, kept on disk.
 - `settings.py` with `settings.toml`: the shipped defaults and the per-user override rule.
 
@@ -50,8 +52,9 @@ change reaches it only after `systemctl --user restart m97`** (or `m97 stop` and
   judging a sparkline or taking a screenshot.
 - gufo and Open WebUI serve the household and the other machines. Restarting gufo means reloading a
   ~104 GiB model, about a minute with the files in page cache. Ask before restarting either of them.
-- This machine's settings are in `~/.config/m97/settings.toml` (trusted networks, PIN), and the remembered
-  service state in `~/.local/state/m97/state.json`. Both are private; neither goes in the repo.
+- This machine's settings are in `~/.config/m97/settings.toml` (trusted networks, PIN), the remembered
+  service state in `~/.local/state/m97/state.json`, and the usage tally beside it in `usage.json`. All
+  three are private; none goes in the repo.
 
 ## Checking the page
 

@@ -6,7 +6,15 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
 
 ---
 
-## 0.2.1 (in progress)
+## 0.3.0 (in progress)
+
+### Added
+
+- **How the machine's time is spent, per day.** A Usage card at the bottom of the page shows the last 14 days as stacked bars of hours: serving, loaded and idle, loading, stopped, and "m97 off" for the time m97 did not see.
+  - Beside it, other GPU use: the GPU busy while gufo is not serving, whatever is using it.
+  - Hovering over a day gives each category's energy in Wh as well.
+  - For scripts and agents, `/api/usage?days=N`, and a `usage` key in `/api/status`; `m97 report` prints a line for today and one for the last 7 days.
+  - m97 counts it as it samples, and keeps the tally in `~/.local/state/m97/usage.json`.
 
 ### Fixed
 

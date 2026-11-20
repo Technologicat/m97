@@ -1,7 +1,8 @@
 """The server's one view of the machine, shared by every open page.
 
 A single set of background tasks keeps it current: the sensor sampler, gufo's HTTP endpoints (polled only
-while its container runs), gufo's log (for the recent requests), and podman's container events. Pages only
+while its container runs), gufo's log (for the recent requests), and podman's container events. The sampler
+also keeps the per-day usage tally (see `usage`). Pages only
 read from it, so a second open tab costs a render, not a second round of sampling.
 """
 
@@ -10,11 +11,12 @@ import collections
 import datetime
 import json
 import logging
+import pathlib
 import time
 import urllib.error
 import urllib.request
 
-from . import access, gufo, intent, sensors, services
+from . import access, gufo, intent, sensors, services, usage
 
 __all__ = ["Hub"]
 
@@ -38,7 +40,7 @@ class Hub:
     of the hub's tasks, never in the middle of an update.
     """
 
-    def __init__(self, settings, *, state_path=None):
+    def __init__(self, settings, *, state_path=None, usage_path=None):
         self.settings = settings
         self.services = {s.key: s for s in (services.gufo_service(settings), services.openwebui_service(settings))}
         self._by_container = {s.container: s.key for s in self.services.values()}
@@ -70,6 +72,12 @@ class Hub:
         self._crash = {key: "" for key in self.services}          # a crash seen live, not yet remembered
         self._autostart_pending = set()   # keys waiting for the network, to be started; count as starting
 
+        # How the machine's time is spent, per day; beside the state file unless told otherwise.
+        self._usage_path = pathlib.Path(usage_path or pathlib.Path(self._state_path).with_name("usage.json"))
+        self.usage = usage.load_usage(self._usage_path)
+        self._usage_t = None          # monotonic time of the last sample counted
+        self._usage_saved_t = time.monotonic()
+
         self.props = None           # gufo's /props, read once each time it becomes ready
         self.slots = []             # parsed /slots
         self.metrics = {}           # parsed /metrics
@@ -99,6 +107,7 @@ class Hub:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        self._save_usage()
 
     # ----------------------------------------------------------------------------
     # Status
@@ -329,10 +338,33 @@ class Hub:
             self.slots, self.metrics, self.gen_tps, self._previous_tokens = [], {}, None, None
             self._previous_slots = {}
         self._remember(now)
+        self._count_usage(now)
         self.history.append((now, {"ppt_w": self.latest.get("ppt_w"),
                                    "gpu_busy_pct": self.latest.get("gpu_busy_pct"),
                                    "cpu_busy_pct": self.latest.get("cpu_busy_pct"),
                                    "gen_tps": self.gen_tps}))
+
+    def _count_usage(self, now, *, save_every=60.0):
+        """Add the time since the previous sample to today's tally, and save the tally once a minute."""
+        if self._usage_t is not None:
+            what = usage.category(container=self.container["gufo"], ready=self.ready["gufo"],
+                                  ready_known=self.ready_known["gufo"], slots=self.slots)
+            date = datetime.date.today().isoformat()
+            self.usage[date] = usage.account(self.usage.get(date), category=what, interval=now - self._usage_t,
+                                             maybe_ppt_w=self.latest.get("ppt_w"),
+                                             maybe_gpu_busy_pct=self.latest.get("gpu_busy_pct"))
+        self._usage_t = now
+        if now - self._usage_saved_t >= save_every:
+            self._save_usage()
+            self._usage_saved_t = now
+
+    def _save_usage(self):
+        if not self.usage:
+            return
+        try:
+            usage.save_usage(self._usage_path, self.usage)
+        except OSError as exc:
+            logger.warning(f"{self._usage_path}: could not save the usage tally: {exc}")
 
     async def _poll_gufo(self, now):
         port = self.settings["gufo"]["port"]

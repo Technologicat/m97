@@ -6,7 +6,7 @@ import time
 
 from nicegui import app, ui
 
-from . import access, gufo, report, services
+from . import access, gufo, report, services, usage
 
 __all__ = ["build"]
 
@@ -35,12 +35,53 @@ def _spark(name, color, *, max_value=None):
                         "areaStyle": {"color": color, "opacity": 0.15}}]}
 
 
+# The usage chart's stacks, bottom up: (key in the usage payload, legend, colour). Serving shares the generation
+# chart's purple, loading the starting badge's amber, stopped its grey; m97 off is left nearly empty.
+USAGE_SERIES = (("serving", "Serving", "#7c6cf0"),
+                ("idle", "Loaded, idle", "#b4aaf7"),
+                ("loading", "Loading", "#f2c037"),
+                ("stopped", "Stopped", "#757575"),
+                ("m97_off", "m97 off", "rgba(128,128,128,.18)"))
+
+# Hover text for a day: each stack's hours and energy, the day's total energy, and the other GPU use.
+_USAGE_TOOLTIP = """params => {
+  const d = params[0].data;
+  let s = d.date + '<br>', total = 0;
+  for (const p of params) {
+    s += p.marker + p.seriesName + ': ' + p.value.toFixed(1) + ' h';
+    if (p.data.wh != null) { s += ', ' + p.data.wh + ' Wh'; total += p.data.wh; }
+    s += '<br>';
+  }
+  return s + 'Energy: ' + total + ' Wh<br>Other GPU use: ' + d.gpu_other_h.toFixed(1) + ' h, ' + d.gpu_other_wh + ' Wh';
+}"""
+
+
+def _usage_chart():
+    """ECharts options for the usage card: a stacked bar of hours per day."""
+    axis = {"color": "#888"}
+    return {"animation": False,
+            "grid": {"left": 36, "right": 8, "top": 32, "bottom": 24},
+            "legend": {"top": 0, "textStyle": axis, "itemWidth": 12, "itemHeight": 12},
+            "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}, ":formatter": _USAGE_TOOLTIP},
+            "xAxis": {"type": "category", "data": [], "axisLabel": axis},
+            "yAxis": {"type": "value", "min": 0, "max": 24, "interval": 6,
+                      "axisLabel": dict(axis, formatter="{value} h"),
+                      "splitLine": {"lineStyle": {"color": "rgba(128,128,128,.2)"}}},
+            "series": [{"name": title, "type": "bar", "stack": "day", "barMaxWidth": 28, "data": [],
+                        "itemStyle": {"color": color}}
+                       for _, title, color in USAGE_SERIES]}
+
+
 def build(hub):
     """Register the page and `GET /api/status`, reading everything they show from `hub`."""
 
     @app.get("/api/status")
     def api_status(history: int = 0):
         return report.snapshot(hub, history=bool(history))
+
+    @app.get("/api/usage")
+    def api_usage(days: int = 14):
+        return report.usage_report(hub.usage, days=max(1, min(days, 3660)))
 
     @ui.page("/")
     async def index(client):
@@ -168,6 +209,21 @@ def build(hub):
                            {"name": "finish", "label": "Finish", "field": "finish", "align": "left"}]
                 table = ui.table(columns=columns, rows=[], row_key="id").props("flat dense").classes("w-full")
                 no_requests = ui.label("No finished requests yet.").classes("text-sm opacity-70")
+
+            # ---- Usage
+            with ui.card().props("flat bordered").classes("w-full"):
+                ui.label("Usage, last 14 days").classes("text-base font-medium")
+                # The chart and, beside it, the other GPU use; on a phone, one under the other.
+                with ui.element("div").classes("w-full grid gap-4 grid-cols-1 md:grid-cols-[minmax(0,1fr)_14rem]"):
+                    usage_chart = ui.echart(_usage_chart()).classes("w-full h-64")
+                    with ui.column().classes("gap-1 md:pt-8"):
+                        ui.label("Other GPU use").classes("text-sm font-medium")
+                        gpu_other_today = ui.label().classes("text-sm")
+                        gpu_other_total = ui.label().classes("text-sm")
+                        ui.label(f"GPU busier than {usage.GPU_OTHER_PCT} % while gufo is not serving, whatever "
+                                 f"is using it.").classes("text-xs opacity-70")
+                ui.label("m97 off: time m97 did not see, with the machine off or asleep, or m97 not running."
+                         ).classes("text-xs opacity-70")
 
         async def act(key, verb):
             decision = await hub.decision()
@@ -328,8 +384,25 @@ def build(hub):
             table.visible = bool(hub.requests)
             no_requests.visible = not hub.requests
 
+        def refresh_usage():
+            days = report.usage_report(hub.usage, days=14)["days"]
+            usage_chart.options["xAxis"]["data"] = [
+                datetime.date.fromisoformat(d["date"]).strftime("%a %-d") for d in days]
+            for series, (key, _, _) in zip(usage_chart.options["series"], USAGE_SERIES):
+                series["data"] = [{"value": d[f"{key}_h"], "wh": d.get(f"{key}_wh"), "date": d["date"],
+                                   "gpu_other_h": d["gpu_other_h"], "gpu_other_wh": d["gpu_other_wh"]}
+                                  for d in days]
+            usage_chart.update()
+            today = days[-1]
+            gpu_other_today.text = f"Today {today['gpu_other_h']:.1f} h, {today['gpu_other_wh']} Wh"
+            hours = sum(d["gpu_other_h"] for d in days)
+            energy = sum(d["gpu_other_wh"] for d in days)
+            gpu_other_total.text = f"14 days {hours:.1f} h, {energy} Wh"
+
         refresh()
         ui.timer(hub.interval, refresh)
+        refresh_usage()
+        ui.timer(60.0, refresh_usage)   # the bars move by minutes, so once a minute is enough
 
         await client.connected()
         try:

@@ -1,6 +1,6 @@
 [project]
 name = "m97"
-version = "0.2.1.dev0"
+version = "0.3.0.dev0"
 description = "A web dashboard and control panel for a gufo LLM server on AMD Strix Halo."
 authors = [{ name = "Juha Jeronen", email = "juha.jeronen@jamk.fi" }]
 readme = "README.md"

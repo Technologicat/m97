@@ -8,7 +8,7 @@
 
 A web dashboard and control panel for a [gufo](https://github.com/gufo-org/gufo) LLM server on AMD Strix
 Halo: what the machine and the model are doing — power, temperatures, memory, GPU and CPU load, generation
-speed, recent requests — and buttons to start and stop gufo and [Open WebUI](https://github.com/open-webui/open-webui),
+speed, recent requests, how the machine's time is spent day by day — and buttons to start and stop gufo and [Open WebUI](https://github.com/open-webui/open-webui),
 for the people in the household who never open a shell.
 
 ![The m97 dashboard while gufo serves two chat requests](https://raw.githubusercontent.com/Technologicat/m97/main/docs/media/dashboard.png)
@@ -21,6 +21,7 @@ For my stance on AI contributions, see the [collaboration guidelines](https://gi
 - [Install and uninstall](#install-and-uninstall)
 - [Running it](#running-it)
 - [Opening the dashboard](#opening-the-dashboard)
+- [How the time is spent](#how-the-time-is-spent)
 - [The data as JSON](#the-data-as-json)
 - [Configuration](#configuration)
 - [Who can press the buttons](#who-can-press-the-buttons)
@@ -92,7 +93,7 @@ trusted network would listen on this machine only. gufo comes first, and Open We
 - A service that stops by itself is reported on the page, with its exit code, its last log lines and what
   to do. m97 does not restart it, and does not start it at boot until it has run again. The report stays
   across a restart of m97.
-- The state is kept in `~/.local/state/m97/state.json`. To turn autostart off, set `autostart = false` under
+- The state is kept in `~/.local/state/m97/state.json`, beside the [usage tally](#how-the-time-is-spent). To turn autostart off, set `autostart = false` under
   `[server]`.
 
 **In the foreground**, for trying it out or for debugging. Ctrl+C stops it:
@@ -119,6 +120,26 @@ http://<server-name>:8097
 The port is a setting (`port` under `[server]`, below). The page needs no login: viewing is open to anyone
 who can reach it, and only the buttons are guarded (see [who can press the buttons](#who-can-press-the-buttons)).
 
+## How the time is spent
+
+The **Usage** card, at the bottom of the page, shows how each of the last 14 days divided, as a stacked bar
+of hours. m97 counts it itself as it samples, once a second, by what gufo was doing:
+
+- **Serving**: gufo ready, and at least one session generating or reading a prompt.
+- **Loaded, idle**: gufo ready, with the model loaded and no session busy.
+- **Loading**: gufo's container running, the model not loaded yet.
+- **Stopped**: gufo's container not running.
+- **m97 off**: the rest of the day, which m97 did not see: the machine off or asleep, or m97 itself not
+  running. m97 cannot tell these apart, so it does not try. For today, the bar runs up to the present.
+
+Beside the bars, **other GPU use**: the time the GPU was busier than 30 % while gufo was not serving,
+whatever was using it. It overlaps the categories rather than being one of them. Hovering over a day gives
+each category's hours and the energy drawn in it (in Wh, from the socket power: CPU and GPU together), and the
+day's other GPU use.
+
+Days run from local midnight to midnight. The tally is kept in `~/.local/state/m97/usage.json`, saved once a
+minute and when m97 stops, so a restart of m97 continues the day.
+
 ## The data as JSON
 
 Everything the page shows is also served as JSON, at `/api/status` on the same port, for scripts and for AI
@@ -129,7 +150,8 @@ curl -s http://<server-name>:8097/api/status            # the current state
 curl -s "http://<server-name>:8097/api/status?history=1"  # plus the graphs' series
 ```
 
-On a machine with m97 installed, `m97 report` prints the same as text:
+The per-day usage is at `/api/usage`, below. On a machine with m97 installed, `m97 report` prints the
+current state as text, with a line of usage for today and for the last 7 days:
 
 ```bash
 m97 report                                   # this machine's m97
@@ -152,6 +174,9 @@ m97 report --json [--history]                # the JSON, unformatted
   …), per-thread CPU load in `cpu_thread_pct`, and `cpu_cores`, the threads grouped by physical core.
 - **`requests`**: the recent finished requests, newest first, with `output_tps` (the speed delivered,
   wall-clock from the first token) beside gufo's own `decode_tps`.
+- **`usage`**: `today` and `last_7_days`, in hours per category (`serving_h`, `idle_h`, `loading_h`,
+  `stopped_h`, `m97_off_h`, `gpu_other_h`) and energy in Wh (`serving_wh` …, `gpu_other_wh`), as at
+  [`/api/usage`](#usage-per-day).
 - **`history`**, only when asked for: `interval_s`, `seconds_ago`, and the series `ppt_w`, `gpu_busy_pct`,
   `cpu_busy_pct` and `gen_tps`, oldest first.
 
@@ -275,6 +300,24 @@ Two more things follow from the network:
 - **The PIN travels unencrypted**, since m97 serves plain HTTP. On an untrusted network, someone watching the
   traffic could read it. Wrong guesses are limited to five per five minutes for each client address.
 
+### Usage per day
+
+`/api/usage` serves the [usage tally](#how-the-time-is-spent) a day at a time, the last 14 days by default:
+
+```bash
+curl -s "http://<server-name>:8097/api/usage?days=30"
+```
+
+The payload is `{"schema": 1, "days": [...]}`, oldest day first and today last. Each day carries its
+`date` (local, ISO 8601) and the keys of `usage` above; a day m97 never saw is all `m97_off_h`. Hours have
+one decimal and Wh none, as on the page.
+
+```json
+{"date": "2026-11-20", "serving_h": 3.2, "idle_h": 5.1, "loading_h": 0.0, "stopped_h": 0.4,
+ "m97_off_h": 6.3, "gpu_other_h": 0.0, "serving_wh": 251, "idle_wh": 97, "loading_wh": 0,
+ "stopped_wh": 2, "gpu_other_wh": 0}
+```
+
 ## What it reads
 
 Everything without root:
@@ -285,6 +328,8 @@ Everything without root:
 - **gufo's HTTP endpoints**, only while its container runs: `/ready`, `/props`, `/slots` (which sessions are
   busy, and their live speed), `/metrics` (the total generation throughput).
 - **gufo's log**, for the recent requests: each finished chat request's token counts, speeds and timings.
+- **Its own samples, added up per day**, for the usage tally; nothing else is kept on disk except which
+  services should run.
 - **Container state** from `podman events`, and **the network** from `nmcli monitor`, so m97 starts no
   processes periodically. It takes about 0.5 % of one CPU core, plus about 0.1 % per open page (measured
   on the server above).

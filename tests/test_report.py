@@ -47,6 +47,8 @@ def make_hub(*, ready=True):
         history=[(now - 2.0, {"ppt_w": 20.0, "gpu_busy_pct": 3, "cpu_busy_pct": 1.0, "gen_tps": None}),
                  (now - 1.0, {"ppt_w": 104.1, "gpu_busy_pct": 99, "cpu_busy_pct": 7.0, "gen_tps": 51.0})],
         interval=1.0,
+        usage={datetime.date.today().isoformat(): {"serving_s": 5400.0, "idle_s": 1800.0, "serving_wh": 120.4,
+                                                   "gpu_other_s": 360.0, "gpu_other_wh": 9.6}},
     )
     hub.status = lambda key: "running" if hub.ready[key] else "stopped"
     return hub
@@ -106,6 +108,27 @@ def test_format_report_with_gufo_down_shows_only_the_summary():
     assert "model       not ready" in text
     assert "gufo stopped unexpectedly" in text
     assert "boom" not in text, "the log lines are left to the page and `podman logs`"
+
+
+def test_usage_in_the_snapshot_and_the_report():
+    payload = report.snapshot(make_hub())
+    today = payload["usage"]["today"]
+    assert (today["serving_h"], today["idle_h"], today["gpu_other_h"]) == (1.5, 0.5, 0.1)
+    assert today["serving_wh"] == 120 and isinstance(today["serving_wh"], int)
+    assert payload["usage"]["last_7_days"]["serving_h"] == 1.5
+    text = report.format_report(payload)
+    assert "today:  serving 1.5 h, loaded idle 0.5 h" in text and "other GPU use 0.1 h" in text
+    del payload["usage"]
+    assert "usage" not in report.format_report(payload), "an older m97 sends no usage"
+
+
+def test_usage_report_lists_days_oldest_first_including_unseen_ones():
+    now = datetime.datetime(2026, 11, 20, 12, 0, tzinfo=UTC).astimezone()
+    tally = {"2026-11-19": {"stopped_s": 3600.0}}
+    days = report.usage_report(tally, days=3, now=now)["days"]
+    assert [d["date"] for d in days] == [(now.date() - datetime.timedelta(days=n)).isoformat() for n in (2, 1, 0)]
+    unseen = days[0]
+    assert unseen["m97_off_h"] in (23.0, 24.0, 25.0) and unseen["serving_h"] == 0.0, "a day never seen is m97 off"
 
 
 def test_report_command_exits_1_when_nothing_answers(capsys):
