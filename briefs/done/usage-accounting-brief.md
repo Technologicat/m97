@@ -1,5 +1,27 @@
 # Brief: how the AI server's time is spent, per day
 
+## What shipped (2026-11-20)
+
+**Done**, in m97 0.3.0 (unreleased at the time of writing). The rest of this brief is the plan as written; the
+README's "How the time is spent" and "Usage per day" describe what shipped.
+
+- **Built as planned:** the four categories and m97 off; the other-GPU-use counter at 30 %; energy in Wh per
+  category; the tally in `usage.json` beside `state.json`, saved once a minute and at shutdown; the interval
+  cap at 10 s; days by local date, with their real length on DST days; `GET /api/usage?days=N`; the
+  full-width Usage card; a usage line in `m97 report`.
+- **Changed or added while building:**
+  - **"Other GPU use" rather than gaming** as the counter's name (Juha, 2026-11-20).
+  - **Today's m97 off runs only up to the present**, so the hours still to come do not show as m97 off.
+  - `m97 report` reads the usage from a `usage` key in `/api/status` (`today`, `last_7_days`), so the text
+    form still comes from one payload; it prints two lines, today and the last 7 days.
+  - Hours carry one decimal and Wh none, on the page and in the JSON. The hover also gives the day's total
+    energy. The card redraws once a minute.
+  - The pure function takes one day's tally rather than the whole history: `usage.account(day, ...) -> day`.
+- **Checked live:** the endpoint, `m97 report`, the card and its hover text; a restart of m97 saved the tally
+  at shutdown and the new process continued the day.
+- **Left for later** (Juha, 2026-11-20): a new README screenshot showing the Usage card, once a few days have
+  been counted; and the 0.3.0 release, if no issues show up in the next few days.
+
 **Goal:** after a few weeks, know how the local AI server's wall time actually divides between serving LLMs,
 sitting loaded and idle, and other GPU use, without anyone having to remember. Raised by Juha on
 2026-11-20, from a suggestion of claude.ai's: he does not yet know how the machine's time will divide in
