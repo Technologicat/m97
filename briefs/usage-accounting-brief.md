@@ -1,7 +1,7 @@
 # Brief: how the AI server's time is spent, per day
 
 **Goal:** after a few weeks, know how the local AI server's wall time actually divides between serving LLMs,
-sitting loaded and idle, and other uses such as gaming, without anyone having to remember. Raised by Juha on
+sitting loaded and idle, and other GPU use, without anyone having to remember. Raised by Juha on
 2026-11-20, from a suggestion of claude.ai's: he does not yet know how the machine's time will divide in
 practice. Planned for m97 **0.3.0**.
 
@@ -17,9 +17,9 @@ practice. Planned for m97 **0.3.0**.
   - **stopped:** gufo's container not running.
 - **"m97 off"** is the rest of the day: the time m97 did not see, whether the machine was off, asleep, or m97
   itself was down. Labelled honestly as that, with no attempt to tell those apart.
-- **A separate counter for the gaming half of the question: GPU busy while gufo is not serving**, GPU load above
-  30 % in a sample whose category is not serving. m97 cannot see a game as such; this catches gaming and any
-  other GPU work, whether gufo is stopped or loaded and idle. It overlaps the categories rather than being one.
+- **A separate counter for other GPU use: GPU busy while gufo is not serving**, GPU load above 30 % in a sample
+  whose category is not serving. m97 cannot see what the work is, so it is named for what it measures: any GPU
+  work besides gufo's, whether gufo is stopped or loaded and idle. It overlaps the categories rather than being one.
 - **Energy per day, in Wh, per category** and for the GPU counter: the sampled socket power (`ppt_w`) times the
   interval, summed. Measured for scale (setup notes): about 5 W idle with nothing loaded, about 19 W with gufo
   loaded and idle, 60–100 W serving.
