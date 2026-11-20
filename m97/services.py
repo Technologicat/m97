@@ -265,19 +265,23 @@ async def follow_events(containers, on_state, *, run=run, retry=5.0):
         await asyncio.sleep(retry)
 
 
-def derive_status(*, container, ready, action):
+def derive_status(*, container, ready, action, ready_known=True):
     """The status the page shows for a service, from what is known about it.
 
     `container` is the container state (`None` if there is none), `ready` whether the service answers,
-    `action` the start or stop m97 is running for it, if any (`"start"`, `"stop"`, or `None`).
-    Returns one of `starting`, `stopping`, `running`, `stopped`. A container running but not ready yet
-    reads as `starting` even if m97 did not start it, e.g. after `gufo-serve start` in a shell.
+    `ready_known` whether that has been checked since the container started running, and `action` the start
+    or stop m97 is running for it, if any (`"start"`, `"stop"`, or `None`).
+    Returns one of `starting`, `stopping`, `running`, `stopped`, `unknown`. A container running but not ready
+    yet reads as `starting` even if m97 did not start it, e.g. after `gufo-serve start` in a shell; one whose
+    readiness has not been checked yet, as just after m97 itself starts, reads as `unknown`.
     """
     if action == "stop":
         return "stopping"
     if action == "start":
         return "starting"
     if container == "running":
+        if not ready_known:
+            return "unknown"
         return "running" if ready else "starting"
     return "stopped"
 

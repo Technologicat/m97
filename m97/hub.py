@@ -53,6 +53,7 @@ class Hub:
 
         self.container = {key: None for key in self.services}   # container state per service
         self.ready = {key: False for key in self.services}
+        self.ready_known = {key: False for key in self.services}   # `ready` checked since the container started
         self.scope = {key: None for key in self.services}       # "all", "local" or None: where it listens
         self.action = {key: None for key in self.services}      # "start" / "stop" while m97 runs one
         self.error = {key: "" for key in self.services}         # why the last start or stop failed
@@ -103,8 +104,9 @@ class Hub:
     # Status
 
     def status(self, key):
-        """`starting`, `stopping`, `running` or `stopped`; see `services.derive_status`."""
-        return services.derive_status(container=self.container[key], ready=self.ready[key], action=self.action[key])
+        """`starting`, `stopping`, `running`, `stopped` or `unknown`; see `services.derive_status`."""
+        return services.derive_status(container=self.container[key], ready=self.ready[key], action=self.action[key],
+                                      ready_known=self.ready_known[key])
 
     async def decision(self):
         """Whether the buttons are open, asking NetworkManager afresh; also updates `self.access`.
@@ -168,7 +170,7 @@ class Hub:
             return
         self.container[key] = state
         if state != "running":
-            self.ready[key] = False
+            self.ready[key] = self.ready_known[key] = False
         if key == "gufo":
             self._follow_gufo_log(state == "running")
         if event is not None and event.get("Status") == "died" and self.action[key] is None:
@@ -320,6 +322,7 @@ class Hub:
                     await self._poll_gufo(now)
                 else:
                     self.ready[key] = await asyncio.to_thread(services.answers, service.ready_url)
+                self.ready_known[key] = True
             else:
                 self.ready[key] = False
         if self.container["gufo"] != "running" or not self.ready["gufo"]:

@@ -11,11 +11,12 @@ from . import access, gufo, report, services
 __all__ = ["build"]
 
 # Badge (background, text) per status, chosen for contrast: white on green-700 is 5.0:1, black on amber
-# 12:1, white on grey-700 6.2:1 (WCAG AA asks 4.5:1 for small text).
+# 12:1, white on grey-700 6.2:1, white on slate-600 7.6:1 (WCAG AA asks 4.5:1 for small text).
 STATUS_COLORS = {"running": ("#15803d", "#ffffff"),
                  "starting": ("#f2c037", "#000000"),
                  "stopping": ("#f2c037", "#000000"),
-                 "stopped": ("#616161", "#ffffff")}
+                 "stopped": ("#616161", "#ffffff"),
+                 "unknown": ("#475569", "#ffffff")}
 
 
 def _fmt(value, spec, unit=""):
@@ -215,7 +216,7 @@ def build(hub):
                 scope.text = {"all": "all interfaces", "local": "this machine only"}.get(where, "")
                 # Stop stays available while starting: it cancels the start and removes the container.
                 start_button.enabled = usable and status == "stopped"
-                stop_button.enabled = usable and status in ("running", "starting")
+                stop_button.enabled = usable and status in ("running", "starting", "unknown")
                 # A live error, or one remembered from before m97 restarted. What to read comes before the
                 # first blank line; the rest, usually log lines, is folded away.
                 message = hub.error[key] or hub.problem[key]

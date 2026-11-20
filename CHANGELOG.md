@@ -8,7 +8,10 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
 
 ## 0.2.1 (in progress)
 
-*No user-visible changes yet.*
+### Fixed
+
+- **For about a second after m97 started, a service that had been running for hours read as "starting".**
+  - m97 had not yet asked the service whether it was ready. Until it has, the status is now `unknown`, on the page, in `/api/status` and in `m97 report`.
 
 ## 0.2.0 — Owl post — 2026-11-20
 

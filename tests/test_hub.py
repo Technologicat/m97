@@ -121,3 +121,22 @@ def test_autostart_starts_gufo_first_and_open_webui_after_it(monkeypatch, tmp_pa
 
     asyncio.run(scenario())
     assert events == ["start gufo", "ready gufo", "start openwebui", "ready openwebui"]
+
+
+def test_a_running_container_is_unknown_until_its_readiness_is_checked(monkeypatch, tmp_path):
+    # Just after m97 starts, the container is known to run but nobody has asked the service yet: saying
+    # "starting" there told an agent a server up for hours was still loading.
+    async def nothing(*args, **kwargs):
+        return None
+
+    hub = make_hub(monkeypatch, tmp_path, start=nothing, stop=nothing)
+    monkeypatch.setattr(hub_module.services, "answers", lambda url: True)
+    monkeypatch.setattr(hub_module.services, "listen_scope", lambda port: "all")
+    hub._sample = lambda: {}
+    hub._on_container("open-webui", "running", None)
+    assert hub.status("openwebui") == "unknown"
+    asyncio.run(hub._tick())
+    assert hub.status("openwebui") == "running"
+    hub._on_container("open-webui", "exited", None)
+    hub._on_container("open-webui", "running", None)
+    assert hub.status("openwebui") == "unknown", "a restarted container is checked afresh"

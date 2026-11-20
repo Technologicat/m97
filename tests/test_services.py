@@ -166,6 +166,12 @@ def test_derive_status(container, ready, action, expected):
     assert derive_status(container=container, ready=ready, action=action) == expected
 
 
+def test_derive_status_unknown_until_readiness_is_checked():
+    assert derive_status(container="running", ready=False, action=None, ready_known=False) == "unknown"
+    assert derive_status(container=None, ready=False, action=None, ready_known=False) == "stopped"
+    assert derive_status(container="running", ready=False, action="stop", ready_known=False) == "stopping"
+
+
 # --------------------------------------------------------------------------------
 # Where a service listens
 
