@@ -1,5 +1,21 @@
 # Brief: the dashboard's data from the command line
 
+## What shipped (2026-11-20)
+
+**Done**, in m97 0.1.1 (unreleased at the time of writing). The rest of this brief is the plan as written; the
+README's "The data as JSON" describes what the endpoint serves, with a live example.
+
+- **Built as planned:** `GET /api/status` with `?history=1`, and `m97 report` with `--url`, `--json` and
+  `--history`, exiting 1 when m97 does not answer.
+- **Added while building:**
+  - A `hostname` key, which the text form needed.
+  - **Numbers rounded to the decimals the page shows** (Juha, 2026-11-20), so that a figure an agent quotes is
+    the one the person beside it sees; `fill` stays a fraction, to three decimals.
+  - Shared helpers, so the page and the payload cannot drift apart: `access.Decision` carries the trusted
+    network's name, `services.service_url` gives a service's address, `gufo.prompt_fully_cached` decides
+    "cached".
+- **Checked live:** `m97 report` on the AI server, and the curl line from the work machine.
+
 **Goal:** the same data the dashboard shows, available outside a browser. The motivating case (Juha,
 2026-11-20): a Claude Code session on the work machine, using the local AI server's LLM, should be able to
 see what that server and its model are doing without opening the page.

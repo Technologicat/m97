@@ -155,7 +155,48 @@ m97 report --json [--history]                # the JSON, unformatted
 - **`history`**, only when asked for: `interval_s`, `seconds_ago`, and the series `ppt_w`, `gpu_busy_pct`,
   `cpu_busy_pct` and `gen_tps`, oldest first.
 
-A value m97 does not have is `null`.
+A value m97 does not have is `null`. **Numbers carry the decimals the page shows them with**, so a figure quoted
+from here is the one a person sees on the page.
+
+An example, from a server with two chats running, trimmed to three of the CPU threads, two of the cores and one
+request:
+
+```json
+{
+  "schema": 1,
+  "m97_version": "0.1.1.dev0",
+  "time": "2026-11-20T13:05:13Z",
+  "hostname": "ai-server",
+  "network": {"trusted": true, "name": "home"},
+  "services": {
+    "gufo": {"status": "running", "container": "running", "url": "http://ai-server:8080/v1",
+             "scope": "all", "error": null},
+    "openwebui": {"status": "running", "container": "running", "url": "http://ai-server:3000",
+                  "scope": "all", "error": null}
+  },
+  "model": {"name": "flash-next", "gufo_version": "0.34.0", "context_tokens": 262144},
+  "generation": {"tps": 60.0, "deferred": 0},
+  "sessions": [
+    {"id": 0, "busy": true, "tps": 38.0, "prompt_tokens": 2115, "generated_tokens": 1819,
+     "context_tokens": 262144, "fill": 0.015},
+    {"id": 1, "busy": true, "tps": 22.0, "prompt_tokens": 3137, "generated_tokens": 2538,
+     "context_tokens": 262144, "fill": 0.022},
+    {"id": 2, "busy": false, "tps": null, "prompt_tokens": 0, "generated_tokens": 0,
+     "context_tokens": 262144, "fill": 0.0}
+  ],
+  "host": {
+    "ppt_w": 60.3, "cpu_temp_c": 56, "gpu_temp_c": 55, "gpu_busy_pct": 99, "gpu_mhz": 2375,
+    "cpu_busy_pct": 7, "cpu_thread_pct": {"0": 4, "1": 2, "2": 7}, "load1": 1.84,
+    "ram_used_gib": 114.4, "ram_total_gib": 123, "gtt_used_gib": 105.9, "gtt_total_gib": 116,
+    "cpu_cores": [[0, 16], [1, 17]]
+  },
+  "requests": [
+    {"time": "2026-11-20T13:04:09Z", "prompt_tokens": 17323, "generated_tokens": 2157,
+     "output_tps": 30.4, "decode_tps": 31.6, "prefill_tps": 1336, "prompt_cached": false,
+     "first_token_s": 15.03, "duration_s": 85.9, "finish": "stop"}
+  ]
+}
+```
 
 ## Configuration
 
