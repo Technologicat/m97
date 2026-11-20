@@ -139,18 +139,19 @@ class Decision:
     """Whether the buttons are open, and a sentence for the page saying why.
 
     `allowed`: open without a PIN. `pin_required`: a PIN would open them. Both false: locked, and `reason`
-    says what to configure.
+    says what to configure. `network`: the name of the trusted network the machine is on, or `None`.
     """
     allowed: bool
     pin_required: bool
     reason: str
+    network: str | None = None
 
 
 def decide(access_settings, connections):
     """Decide whether the buttons are open, given the `access` settings and the active connections."""
     name = trusted_network(access_settings.get("trusted_networks", []), connections)
     if name is not None:
-        return Decision(allowed=True, pin_required=False, reason=f"On the trusted network “{name}”.")
+        return Decision(allowed=True, pin_required=False, reason=f"On the trusted network “{name}”.", network=name)
     if access_settings.get("pin"):
         return Decision(allowed=False, pin_required=True,
                         reason="Not on a trusted network: enter the PIN to use the buttons.")

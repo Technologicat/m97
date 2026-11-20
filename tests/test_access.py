@@ -95,11 +95,13 @@ def test_decide_trusted():
     decision = decide({"pin": "", "trusted_networks": NETWORKS}, on(HOME_UUID, "192.168.50.58/24"))
     assert decision.allowed and not decision.pin_required
     assert "home" in decision.reason
+    assert decision.network == "home"
 
 
 def test_decide_untrusted_with_pin():
     decision = decide({"pin": "0451", "trusted_networks": NETWORKS}, on(CAFE_UUID, "10.1.2.3/16"))
     assert not decision.allowed and decision.pin_required
+    assert decision.network is None
 
 
 @pytest.mark.parametrize("connections", [[], on(CAFE_UUID, "10.1.2.3/16")])

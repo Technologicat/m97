@@ -21,6 +21,7 @@ For my stance on AI contributions, see the [collaboration guidelines](https://gi
 - [Install and uninstall](#install-and-uninstall)
 - [Running it](#running-it)
 - [Opening the dashboard](#opening-the-dashboard)
+- [The data as JSON](#the-data-as-json)
 - [Configuration](#configuration)
 - [Who can press the buttons](#who-can-press-the-buttons)
 - [What it reads](#what-it-reads)
@@ -117,6 +118,44 @@ http://<server-name>:8097
 
 The port is a setting (`port` under `[server]`, below). The page needs no login: viewing is open to anyone
 who can reach it, and only the buttons are guarded (see [who can press the buttons](#who-can-press-the-buttons)).
+
+## The data as JSON
+
+Everything the page shows is also served as JSON, at `/api/status` on the same port, for scripts and for AI
+agents working on other machines. Like the page, it is read-only and needs no PIN.
+
+```bash
+curl -s http://<server-name>:8097/api/status            # the current state
+curl -s "http://<server-name>:8097/api/status?history=1"  # plus the graphs' series
+```
+
+On a machine with m97 installed, `m97 report` prints the same as text:
+
+```bash
+m97 report                                   # this machine's m97
+m97 report --url http://<server-name>:8097   # another machine's
+m97 report --json [--history]                # the JSON, unformatted
+```
+
+`m97 report` exits with status 1 when m97 does not answer; a stopped service is a normal report. The keys:
+
+- **`schema`**: the payload's version. It goes up when a key changes meaning or goes away, not when one is
+  added.
+- **`m97_version`**, **`time`** (ISO 8601, UTC), **`hostname`**, **`network`** (`trusted`, and the trusted
+  network's `name`).
+- **`services`**: for `gufo` and `openwebui`, the `status` the page shows, the `container` state, the `url`, the
+  `scope` it listens on (`all`, `local`, or `null` when not listening), and any `error`.
+- **`model`** (`name`, `gufo_version`, `context_tokens`), **`generation`** (total `tps`, requests `deferred`)
+  and **`sessions`** (per session: `busy`, live `tps`, `prompt_tokens`, `generated_tokens`, `context_tokens`,
+  and the context `fill` from 0 to 1). `null` or empty while gufo is not ready.
+- **`host`**: the sensors, with units in the key names (`ppt_w`, `cpu_temp_c`, `gpu_busy_pct`, `ram_used_gib`
+  …), per-thread CPU load in `cpu_thread_pct`, and `cpu_cores`, the threads grouped by physical core.
+- **`requests`**: the recent finished requests, newest first, with `output_tps` (the speed delivered,
+  wall-clock from the first token) beside gufo's own `decode_tps`.
+- **`history`**, only when asked for: `interval_s`, `seconds_ago`, and the series `ppt_w`, `gpu_busy_pct`,
+  `cpu_busy_pct` and `gen_tps`, oldest first.
+
+A value m97 does not have is `null`.
 
 ## Configuration
 

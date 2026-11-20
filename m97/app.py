@@ -6,7 +6,7 @@ import time
 
 from nicegui import app, ui
 
-from . import access, gufo
+from . import access, gufo, report, services
 
 __all__ = ["build"]
 
@@ -35,7 +35,11 @@ def _spark(name, color, *, max_value=None):
 
 
 def build(hub):
-    """Register the page, reading everything it shows from `hub`."""
+    """Register the page and `GET /api/status`, reading everything they show from `hub`."""
+
+    @app.get("/api/status")
+    def api_status(history: int = 0):
+        return report.snapshot(hub, history=bool(history))
 
     @ui.page("/")
     async def index(client):
@@ -202,8 +206,7 @@ def build(hub):
                 state = hub.container[key]
                 detail.text = hub.note[key] or (f"container: {state}" if state not in (None, "running") else "")
                 service, where = hub.services[key], hub.scope[key]
-                host = socket.gethostname() if where == "all" else "127.0.0.1"
-                url = f"http://{host}:{service.port}{service.url_path}" if where else ""
+                url = services.service_url(service, where) or ""
                 address.text = url
                 address.props(f'href="{url}"')
                 address.visible = bool(url) and service.browsable
@@ -345,7 +348,6 @@ def _ms_to_s(value):
 
 def _prefill_cell(record):
     """Prefill speed for the recent-requests table, or "cached" when the whole prompt came from the cache."""
-    prompt, cached = record.get("prompt_tokens"), record.get("cached_tokens")
-    if isinstance(prompt, int) and isinstance(cached, int) and prompt > 0 and cached >= prompt:
+    if gufo.prompt_fully_cached(record):
         return "cached"
     return _fmt(record.get("prefill_tps"), ".0f", " tok/s")

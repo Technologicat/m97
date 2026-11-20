@@ -11,6 +11,7 @@ import logging
 import os
 import pathlib
 import shutil
+import socket
 import tempfile
 import time
 import urllib.error
@@ -21,7 +22,7 @@ __all__ = ["Service", "gufo_service", "openwebui_service",
            "run", "container_state", "answers", "start", "stop",
            "follow_events", "EVENT_STATES",
            "derive_status",
-           "listen_scope", "parse_proc_net_tcp"]
+           "listen_scope", "parse_proc_net_tcp", "service_url"]
 
 logger = logging.getLogger(__name__)
 
@@ -322,3 +323,14 @@ def listen_scope(port, *, root="/"):
     if addresses:
         return "local" if all(a in _LOOPBACK for a in addresses) else "all"
     return None
+
+
+def service_url(service, scope):
+    """The address people use to reach `service`, given `listen_scope`'s answer for its port, or `None`.
+
+    On all interfaces it names this machine by hostname; on loopback only, `127.0.0.1`.
+    """
+    if not scope:
+        return None
+    host = socket.gethostname() if scope == "all" else "127.0.0.1"
+    return f"http://{host}:{service.port}{service.url_path}"

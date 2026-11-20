@@ -28,6 +28,7 @@ One JSON object. Units go in the key names, as the hub's sensor sample already d
   "schema": 1,
   "m97_version": "0.1.1",
   "time": "2026-11-20T09:30:00Z",
+  "hostname": "ai-server",
   "network": {"trusted": true, "name": "home"},
   "services": {
     "gufo": {"status": "running", "container": "running", "url": "http://ai-server:8080/v1",

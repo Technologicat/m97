@@ -12,9 +12,10 @@ manual; [`briefs/done/dashboard.md`](briefs/done/dashboard.md) records the desig
 
 The package, `m97/`:
 
-- `cli.py`: the `m97` verbs (`serve`, `install`, `uninstall`, `start`, `stop`, `status`, `logs`); the
-  systemd user unit is written by `install`.
-- `app.py`: the NiceGUI page. It only renders, from the hub, on a per-page timer.
+- `cli.py`: the `m97` verbs (`serve`, `install`, `uninstall`, `start`, `stop`, `status`, `logs`, `report`);
+  the systemd user unit is written by `install`.
+- `app.py`: the NiceGUI page, and the read-only `GET /api/status`. Both only read from the hub.
+- `report.py`: the hub's state as the JSON payload (`snapshot`), and that payload as text for `m97 report`.
 - `hub.py`: the one shared view of the machine: the sampling loop, gufo's HTTP endpoints, gufo's log,
   podman events, `nmcli monitor`, history, actions, autostart and crash reports.
 - `services.py`: the podman command lines, start and stop, the event follower, where a service listens.

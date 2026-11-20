@@ -10,7 +10,7 @@ import re
 
 __all__ = ["parse_metrics",
            "parse_slots", "with_slot_rates",
-           "parse_log_line", "completed_request", "output_tps"]
+           "parse_log_line", "completed_request", "output_tps", "prompt_fully_cached"]
 
 # What the metrics mean, as observed on gufo 0.34.0 (2026-11-18), three concurrent chat requests:
 #
@@ -160,3 +160,10 @@ def output_tps(record):
     if not all(isinstance(x, (int, float)) for x in (generated, duration, ttft)) or duration <= ttft:
         return None
     return generated / ((duration - ttft) / 1000)
+
+
+def prompt_fully_cached(record):
+    """Whether a finished request's whole prompt came from gufo's prompt cache, from a `completed_request`
+    record. Its `prefill_tps` is then 0, nothing having been prefilled."""
+    prompt, cached = record.get("prompt_tokens"), record.get("cached_tokens")
+    return isinstance(prompt, int) and isinstance(cached, int) and prompt > 0 and cached >= prompt

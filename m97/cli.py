@@ -6,15 +6,19 @@
     m97 start | stop           start or stop the service
     m97 status                 running or not, and the URL
     m97 logs [-f]              the service's log
+    m97 report [--url URL]     what the dashboard shows, as text (--json for the data, --history for the graphs)
 """
 
 import argparse
+import json
 import logging
 import pathlib
 import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 from . import __version__, settings as settings_module
 
@@ -183,6 +187,28 @@ def status(args):
     return 0
 
 
+def report(args):
+    from .report import format_report
+
+    base = (args.url or f"http://127.0.0.1:{_load_settings(args.settings)['server']['port']}").rstrip("/")
+    url = f"{base}/api/status" + ("?history=1" if args.history else "")
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            text = response.read().decode("utf-8")
+    except (OSError, urllib.error.URLError) as exc:
+        print(f"m97: no answer from {url}: {getattr(exc, 'reason', exc)}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(text)
+    else:
+        try:
+            print(format_report(json.loads(text)))
+        except (ValueError, KeyError, TypeError) as exc:
+            print(f"m97: {url} answered with something that is not m97's status data: {exc!r}", file=sys.stderr)
+            return 1
+    return 0
+
+
 def logs(args):
     return subprocess.run(["journalctl", "--user", "-u", UNIT_NAME, *(["-f"] if args.follow else [])]).returncode
 
@@ -211,6 +237,12 @@ def main(argv=None):
                             ("stop", stop, "stop the service"),
                             ("status", status, "running or not, and the URL")):
         verbs.add_parser(name, help=text).set_defaults(run=run)
+
+    p = verbs.add_parser("report", help="what the dashboard shows, as text")
+    p.add_argument("--url", help="the m97 to ask, e.g. http://ai-server:8097 (default: this machine's)")
+    p.add_argument("--json", action="store_true", help="print the data as JSON, unformatted")
+    p.add_argument("--history", action="store_true", help="include the graphs' series (with --json)")
+    p.set_defaults(run=report)
 
     p = verbs.add_parser("logs", help="the service's log")
     p.add_argument("-f", "--follow", action="store_true", help="keep following it")
