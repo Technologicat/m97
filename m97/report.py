@@ -17,6 +17,22 @@ __all__ = ["SCHEMA", "snapshot", "format_report"]
 SCHEMA = 1
 
 
+# Numbers are rounded to the decimals the page shows them with, so that a figure an agent quotes from here is
+# the one the person beside it sees on the page. Keep these in step with app.py's formats.
+DECIMALS = {"ppt_w": 1, "cpu_temp_c": 0, "gpu_temp_c": 0, "gpu_busy_pct": 0, "gpu_mhz": 0, "cpu_busy_pct": 0,
+            "load1": 2, "ram_used_gib": 1, "ram_total_gib": 0, "gtt_used_gib": 1, "gtt_total_gib": 0,
+            "gen_tps": 1, "tps": 1, "output_tps": 1, "decode_tps": 1, "prefill_tps": 0, "first_token_s": 2,
+            "duration_s": 1, "thread_pct": 0, "fill": 3}   # fill: a fraction, so 3 decimals is the page's 0.1 %
+
+
+def _round(value, key):
+    """`value` rounded as `DECIMALS[key]` says; an int when that is 0. `None` and non-numbers pass through."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return value
+    ndigits = DECIMALS[key]
+    return int(round(value)) if ndigits == 0 else round(value, ndigits)
+
+
 def _iso(when):
     """An aware `datetime` as ISO 8601 in UTC, seconds precision, with a `Z`."""
     return when.astimezone(datetime.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -30,12 +46,12 @@ def _request(record):
     return {"time": _iso(record["time"]),
             "prompt_tokens": record.get("prompt_tokens"),
             "generated_tokens": record.get("generated_tokens"),
-            "output_tps": gufo.output_tps(record),
-            "decode_tps": record.get("decode_tps"),
-            "prefill_tps": record.get("prefill_tps"),
+            "output_tps": _round(gufo.output_tps(record), "output_tps"),
+            "decode_tps": _round(record.get("decode_tps"), "decode_tps"),
+            "prefill_tps": _round(record.get("prefill_tps"), "prefill_tps"),
             "prompt_cached": gufo.prompt_fully_cached(record),
-            "first_token_s": _ms_to_s(record.get("ttft_ms")),
-            "duration_s": _ms_to_s(record.get("duration_ms")),
+            "first_token_s": _round(_ms_to_s(record.get("ttft_ms")), "first_token_s"),
+            "duration_s": _round(_ms_to_s(record.get("duration_ms")), "duration_s"),
             "finish": record.get("finish")}
 
 
@@ -60,8 +76,10 @@ def snapshot(hub, *, history=False):
         "model": None,
         "generation": None,
         "sessions": [],
-        "host": dict(hub.latest, cpu_thread_pct={str(cpu): pct for cpu, pct in
-                                                 (hub.latest.get("cpu_thread_pct") or {}).items()},
+        "host": dict({key: _round(value, key) if key in DECIMALS else value  # a new sensor passes through
+                      for key, value in hub.latest.items()},
+                     cpu_thread_pct={str(cpu): _round(pct, "thread_pct") for cpu, pct in
+                                     (hub.latest.get("cpu_thread_pct") or {}).items()},
                      cpu_cores=hub.cpu_cores),
         "requests": [_request(r) for r in reversed(hub.requests)],
     }
@@ -70,18 +88,20 @@ def snapshot(hub, *, history=False):
         payload["model"] = {"name": props.get("model_alias") or props.get("model"),
                             "gufo_version": (props.get("build_info") or "").split(" ")[0] or None,
                             "context_tokens": (props.get("default_generation_settings") or {}).get("n_ctx")}
-        payload["generation"] = {"tps": hub.gen_tps,
-                                 "deferred": hub.metrics.get("llamacpp:requests_deferred")}
-        payload["sessions"] = [{"id": s["id"], "busy": s["busy"], "tps": s.get("tps"),
+        maybe_deferred = hub.metrics.get("llamacpp:requests_deferred")
+        payload["generation"] = {"tps": _round(hub.gen_tps, "gen_tps"),
+                                 "deferred": None if maybe_deferred is None else int(maybe_deferred)}
+        payload["sessions"] = [{"id": s["id"], "busy": s["busy"], "tps": _round(s.get("tps"), "tps"),
                                 "prompt_tokens": s["prompt_tokens"], "generated_tokens": s["decoded"],
-                                "context_tokens": s["n_ctx"], "fill": s["fill"]}
+                                "context_tokens": s["n_ctx"], "fill": _round(s["fill"], "fill")}
                                for s in hub.slots]
     if history:
         now = time.monotonic()
         series = ("ppt_w", "gpu_busy_pct", "cpu_busy_pct", "gen_tps")
         payload["history"] = {"interval_s": hub.interval,
                               "seconds_ago": [round(now - t, 1) for t, _ in hub.history],
-                              **{name: [values.get(name) for _, values in hub.history] for name in series}}
+                              **{name: [_round(values.get(name), name) for _, values in hub.history]
+                                 for name in series}}
     return payload
 
 

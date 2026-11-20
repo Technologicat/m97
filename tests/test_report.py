@@ -3,8 +3,6 @@ import json
 import time
 import types
 
-import pytest
-
 from m97 import report
 from m97.access import Decision
 from m97.cli import main
@@ -72,7 +70,8 @@ def test_snapshot_with_gufo_ready():
 def test_requests_newest_first_with_derived_speeds():
     requests = report.snapshot(make_hub())["requests"]
     assert [r["time"] for r in requests] == ["2026-11-20T09:01:00Z", "2026-11-20T09:00:00Z"]
-    assert requests[0]["output_tps"] == pytest.approx(838 / ((92861.3 - 125.6) / 1000))
+    assert requests[0]["output_tps"] == round(838 / ((92861.3 - 125.6) / 1000), 1)   # as the page shows it
+    assert requests[0]["first_token_s"] == 0.13 and requests[0]["prefill_tps"] == 139
     assert requests[0]["decode_tps"] == 40.4
     assert requests[1]["prompt_cached"] is True and requests[0]["prompt_cached"] is False
 
@@ -112,3 +111,17 @@ def test_format_report_with_gufo_down_shows_only_the_summary():
 def test_report_command_exits_1_when_nothing_answers(capsys):
     assert main(["report", "--url", "http://127.0.0.1:1"]) == 1
     assert "no answer from http://127.0.0.1:1/api/status" in capsys.readouterr().err
+
+
+def test_numbers_have_the_page_decimals():
+    hub = make_hub()
+    hub.gen_tps = 3.997884663252176
+    hub.latest = dict(hub.latest, ppt_w=59.6123, gpu_busy_pct=99, load1=2.0123, ram_total_gib=123.46,
+                      some_new_sensor=1.23456)
+    payload = report.snapshot(hub)
+    assert payload["generation"]["tps"] == 4.0
+    assert payload["host"]["ppt_w"] == 59.6
+    assert payload["host"]["load1"] == 2.01
+    assert payload["host"]["ram_total_gib"] == 123 and isinstance(payload["host"]["ram_total_gib"], int)
+    assert payload["host"]["some_new_sensor"] == 1.23456, "a key the table does not know passes through"
+    assert payload["sessions"][0]["fill"] == 0.001
