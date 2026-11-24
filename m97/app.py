@@ -35,10 +35,11 @@ def _spark(name, color, *, max_value=None):
                         "areaStyle": {"color": color, "opacity": 0.15}}]}
 
 
-# The usage chart's stacks, bottom up: (key in the usage payload, legend, colour). Serving shares the generation
-# chart's purple, loading the starting badge's amber, stopped its grey; m97 off is left nearly empty.
-USAGE_SERIES = (("serving", "Serving", "#7c6cf0"),
-                ("idle", "Loaded, idle", "#b4aaf7"),
+# The usage chart's stacks, bottom up: (key in the usage payload, legend, colour). Idle takes the generation
+# chart's purple and serving a lighter one, which stands out more on the dark background; loading takes the
+# starting badge's amber, stopped its grey; m97 off is left nearly empty.
+USAGE_SERIES = (("serving", "Serving", "#b4aaf7"),
+                ("idle", "Loaded, idle", "#7c6cf0"),
                 ("loading", "Loading", "#f2c037"),
                 ("stopped", "Stopped", "#757575"),
                 ("m97_off", "m97 off", "rgba(128,128,128,.18)"))
@@ -213,15 +214,22 @@ def build(hub):
             # ---- Usage
             with ui.card().props("flat bordered").classes("w-full"):
                 ui.label("Usage, last 14 days").classes("text-base font-medium")
-                # The chart and, beside it, the other GPU use; on a phone, one under the other.
+                # The chart and, beside it, the totals for gufo and for the other GPU use; on a phone, one under
+                # the other.
                 with ui.element("div").classes("w-full grid gap-4 grid-cols-1 md:grid-cols-[minmax(0,1fr)_14rem]"):
                     usage_chart = ui.echart(_usage_chart()).classes("w-full h-64")
-                    with ui.column().classes("gap-1 md:pt-8"):
-                        ui.label("Other GPU use").classes("text-sm font-medium")
-                        gpu_other_today = ui.label().classes("text-sm")
-                        gpu_other_total = ui.label().classes("text-sm")
-                        ui.label(f"GPU busier than {usage.GPU_OTHER_PCT} % while gufo is not serving, whatever "
-                                 f"is using it.").classes("text-xs opacity-70")
+                    usage_totals = []   # (key in the usage payload, today label, 14-day label)
+                    with ui.column().classes("gap-3 md:pt-8"):
+                        for key, title, maybe_note in (
+                                ("serving", "gufo serving", None),
+                                ("idle", "gufo loaded, idle", None),
+                                ("gpu_other", "Other GPU use", f"GPU busier than {usage.GPU_OTHER_PCT} % while gufo "
+                                                               f"is not serving, whatever is using it.")):
+                            with ui.column().classes("gap-1"):
+                                ui.label(title).classes("text-sm font-medium")
+                                usage_totals.append((key, ui.label().classes("text-sm"), ui.label().classes("text-sm")))
+                                if maybe_note:
+                                    ui.label(maybe_note).classes("text-xs opacity-70")
                 ui.label("m97 off: time m97 did not see, with the machine off or asleep, or m97 not running."
                          ).classes("text-xs opacity-70")
 
@@ -328,8 +336,10 @@ def build(hub):
 
             speed_label.text = _fmt(hub.gen_tps, ".1f", " tok/s") if hub.ready["gufo"] else "–"
             live = [slot["tps"] for slot in hub.slots if slot["busy"] and slot["tps"] is not None]
-            live_label.text = f"Now, per session: {' · '.join(f'{tps:.1f}' for tps in live)} tok/s" if live else ""
-            live_label.visible = bool(live)
+            # Blank rather than hidden when nothing is decoding, so the line keeps its height and the page below
+            # does not jump with every short request. An empty label has no height; a no-break space has one.
+            live_label.text = (f"Now, per session: {' · '.join(f'{tps:.1f}' for tps in live)} tok/s" if live
+                               else " ")  # NO-BREAK SPACE
             if hub.requests:
                 last = hub.requests[-1]
                 last_label.text = (f"Last request: {_fmt(gufo.output_tps(last), '.1f')} tok/s generation "
@@ -393,11 +403,12 @@ def build(hub):
                                    "gpu_other_h": d["gpu_other_h"], "gpu_other_wh": d["gpu_other_wh"]}
                                   for d in days]
             usage_chart.update()
-            today = days[-1]
-            gpu_other_today.text = f"Today {today['gpu_other_h']:.1f} h, {today['gpu_other_wh']} Wh"
-            hours = sum(d["gpu_other_h"] for d in days)
-            energy = sum(d["gpu_other_wh"] for d in days)
-            gpu_other_total.text = f"14 days {hours:.1f} h, {energy} Wh"
+            for key, today_label, total_label in usage_totals:
+                today = days[-1]
+                today_label.text = f"Today {today[f'{key}_h']:.1f} h, {today[f'{key}_wh']} Wh"
+                hours = sum(d[f"{key}_h"] for d in days)
+                energy = sum(d[f"{key}_wh"] for d in days)
+                total_label.text = f"14 days {hours:.1f} h, {energy} Wh"
 
         refresh()
         ui.timer(hub.interval, refresh)
