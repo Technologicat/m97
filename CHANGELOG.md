@@ -6,7 +6,7 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
 
 ---
 
-## 0.3.0 (in progress)
+## 0.3.0 — Midnight oil — 2026-11-24
 
 ### Added
 
@@ -21,7 +21,6 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
 ### Fixed
 
 - **The page no longer jumps up and down while short requests come and go.** The Generation card's "Now, per session" line keeps its space when nothing is decoding.
-
 - **For about a second after m97 started, a service that had been running for hours read as "starting".**
   - m97 had not yet asked the service whether it was ready. Until it has, the status is now `unknown`, on the page, in `/api/status` and in `m97 report`.
 
