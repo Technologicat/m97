@@ -306,6 +306,42 @@ The settings, by table:
 m97 recognizes a service by its container name, so a container started some other way, by hand or by a
 script, shows up on the page as long as the name matches.
 
+A fuller file, with a key or more from every table:
+
+```toml
+[server]
+port = 8097
+autostart = true
+
+[access]
+pin = "2468"
+
+[[access.trusted_networks]]
+name = "home"
+connections = ["…UUID of the home Wi-Fi profile…"]
+subnet = "192.168.1.0/24"
+
+[gufo]
+image = "ghcr.io/gufo-org/toolboxes/gufo-runtime:0.34.0"
+models_dir = "/data/models"        # the models on a second drive
+sessions = 3                       # three chats at once
+context = 262144                   # tokens per session
+extra_args = ["--cache-ram-bytes", "off"]
+
+[openwebui]
+image = "ghcr.io/open-webui/open-webui:v0.13.3"   # pin an Open WebUI version
+# Folders for Open WebUI's plugins, here a lorebook for grimoire's filter and tool, whose valves are set to
+# the paths inside the container. The lorebook holds a symlink to a glossary kept in another folder, so that
+# folder is mounted too, at the same path as on the host: inside the container, a symlink to a host path
+# resolves only if its target is mounted where it points.
+mounts = ["~/.config/raven/librarian/lorebook:/lorebook",
+          "~/Documents/glossaries:/home/me/Documents/glossaries",
+          "~/.config/raven/librarian/lorebook_expansion:/lorebook_expansion"]
+
+[history]
+seconds = 1800                     # graphs reaching back half an hour
+```
+
 ## Who can press the buttons
 
 Viewing is always open. The start and stop buttons are open **while the server is on a trusted network**,
