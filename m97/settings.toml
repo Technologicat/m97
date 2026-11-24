@@ -52,7 +52,8 @@ start_timeout = 300
 # Host folders mounted read-only into the container, for Open WebUI's plugins to read: `"host:container"`
 # strings, `~` expanded in the host path. A host path that does not exist is skipped, with a warning in
 # the log. A symlink inside a mounted folder resolves only if its target is mounted too, at the same path.
-# For example, grimoire's lorebook, a symlink in it, and the inflected forms of its terms:
+# For example, the lorebook of grimoire (https://github.com/Technologicat/grimoire), a symlink in it, and the
+# inflected forms of its terms:
 #
 #   mounts = ["~/.config/raven/librarian/lorebook:/lorebook",
 #             "~/Documents/koodit/substrate-independent:/home/me/Documents/koodit/substrate-independent",

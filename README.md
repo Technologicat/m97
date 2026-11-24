@@ -306,7 +306,9 @@ The settings, by table:
 m97 recognizes a service by its container name, so a container started some other way, by hand or by a
 script, shows up on the page as long as the name matches.
 
-A fuller file, with a key or more from every table:
+A fuller file, with a key or more from every table. Its mounts are for
+[grimoire](https://github.com/Technologicat/grimoire), which gives Open WebUI's model the definitions of your
+own terms from a folder of Markdown files:
 
 ```toml
 [server]
