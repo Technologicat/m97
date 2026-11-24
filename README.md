@@ -132,10 +132,14 @@ of hours. m97 counts it itself as it samples, once a second, by what gufo was do
 - **m97 off**: the rest of the day, which m97 did not see: the machine off or asleep, or m97 itself not
   running. m97 cannot tell these apart, so it does not try. For today, the bar runs up to the present.
 
-Beside the bars, **other GPU use**: the time the GPU was busier than 30 % while gufo was not serving,
-whatever was using it. It overlaps the categories rather than being one of them. Hovering over a day gives
-each category's hours and the energy drawn in it (in Wh, from the socket power: CPU and GPU together), and the
-day's other GPU use.
+Beside the bars, today's and the 14 days' totals, in hours and in energy (Wh, from the socket power: CPU and
+GPU together), for three things:
+
+- **gufo serving**, and **gufo loaded, idle**: the two categories above.
+- **Other GPU use**: the time the GPU was busier than 30 % while gufo was not serving, whatever was using it.
+  It overlaps the categories rather than being one of them.
+
+Hovering over a day gives each category's hours and energy, the day's total energy, and its other GPU use.
 
 Days run from local midnight to midnight. The tally is kept in `~/.local/state/m97/usage.json`, saved once a
 minute and when m97 stops, so a restart of m97 continues the day.
@@ -165,7 +169,8 @@ m97 report --json [--history]                # the JSON, unformatted
   added.
 - **`m97_version`**, **`time`** (ISO 8601, UTC), **`hostname`**, **`network`** (`trusted`, and the trusted
   network's `name`).
-- **`services`**: for `gufo` and `openwebui`, the `status` the page shows, the `container` state, the `url`, the
+- **`services`**: for `gufo` and `openwebui`, the `status` the page shows (`running`, `starting`, `stopping`,
+  `stopped`, or `unknown` for the moment after m97 starts, before it has asked), the `container` state, the `url`, the
   `scope` it listens on (`all`, `local`, or `null` when not listening), and any `error`.
 - **`model`** (`name`, `gufo_version`, `context_tokens`), **`generation`** (total `tps`, requests `deferred`)
   and **`sessions`** (per session: `busy`, live `tps`, `prompt_tokens`, `generated_tokens`, `context_tokens`,
@@ -189,7 +194,7 @@ request:
 ```json
 {
   "schema": 1,
-  "m97_version": "0.1.1.dev0",
+  "m97_version": "0.3.0",
   "time": "2026-11-20T13:05:13Z",
   "hostname": "ai-server",
   "network": {"trusted": true, "name": "home"},
@@ -219,8 +224,34 @@ request:
     {"time": "2026-11-20T13:04:09Z", "prompt_tokens": 17323, "generated_tokens": 2157,
      "output_tps": 30.4, "decode_tps": 31.6, "prefill_tps": 1336, "prompt_cached": false,
      "first_token_s": 15.03, "duration_s": 85.9, "finish": "stop"}
-  ]
+  ],
+  "usage": {
+    "today": {"serving_h": 3.5, "idle_h": 4.5, "loading_h": 0.0, "stopped_h": 0.0, "m97_off_h": 8.7,
+              "gpu_other_h": 0.0, "serving_wh": 224, "idle_wh": 30, "loading_wh": 0, "stopped_wh": 0,
+              "gpu_other_wh": 2},
+    "last_7_days": {"serving_h": 15.0, "idle_h": 39.2, "loading_h": 0.1, "stopped_h": 0.0, "m97_off_h": 106.5,
+                    "gpu_other_h": 0.1, "serving_wh": 935, "idle_wh": 250, "loading_wh": 1, "stopped_wh": 0,
+                    "gpu_other_wh": 5}
+  }
 }
+```
+
+### Usage per day
+
+`/api/usage` serves the [usage tally](#how-the-time-is-spent) a day at a time, the last 14 days by default:
+
+```bash
+curl -s "http://<server-name>:8097/api/usage?days=30"
+```
+
+The payload is `{"schema": 1, "days": [...]}`, oldest day first and today last. Each day carries its
+`date` (local, ISO 8601) and the keys of `usage` above; a day m97 never saw is all `m97_off_h`. Hours have
+one decimal and Wh none, as on the page.
+
+```json
+{"date": "2026-11-20", "serving_h": 3.2, "idle_h": 5.1, "loading_h": 0.0, "stopped_h": 0.4,
+ "m97_off_h": 6.3, "gpu_other_h": 0.0, "serving_wh": 251, "idle_wh": 97, "loading_wh": 0,
+ "stopped_wh": 2, "gpu_other_wh": 0}
 ```
 
 ## Configuration
@@ -303,24 +334,6 @@ Two more things follow from the network:
 - **The PIN travels unencrypted**, since m97 serves plain HTTP. On an untrusted network, someone watching the
   traffic could read it. Wrong guesses are limited to five per five minutes for each client address.
 
-### Usage per day
-
-`/api/usage` serves the [usage tally](#how-the-time-is-spent) a day at a time, the last 14 days by default:
-
-```bash
-curl -s "http://<server-name>:8097/api/usage?days=30"
-```
-
-The payload is `{"schema": 1, "days": [...]}`, oldest day first and today last. Each day carries its
-`date` (local, ISO 8601) and the keys of `usage` above; a day m97 never saw is all `m97_off_h`. Hours have
-one decimal and Wh none, as on the page.
-
-```json
-{"date": "2026-11-20", "serving_h": 3.2, "idle_h": 5.1, "loading_h": 0.0, "stopped_h": 0.4,
- "m97_off_h": 6.3, "gpu_other_h": 0.0, "serving_wh": 251, "idle_wh": 97, "loading_wh": 0,
- "stopped_wh": 2, "gpu_other_wh": 0}
-```
-
 ## What it reads
 
 Everything without root:
@@ -331,8 +344,8 @@ Everything without root:
 - **gufo's HTTP endpoints**, only while its container runs: `/ready`, `/props`, `/slots` (which sessions are
   busy, and their live speed), `/metrics` (the total generation throughput).
 - **gufo's log**, for the recent requests: each finished chat request's token counts, speeds and timings.
-- **Its own samples, added up per day**, for the usage tally; nothing else is kept on disk except which
-  services should run.
+- **Its own samples, added up per day**, for the usage tally. Besides that, all m97 keeps on disk is which
+  services should run, and the report of any that stopped by itself.
 - **Container state** from `podman events`, and **the network** from `nmcli monitor`, so m97 starts no
   processes periodically. It takes about 0.5 % of one CPU core, plus about 0.1 % per open page (measured
   on the server above).
