@@ -21,6 +21,7 @@ For my stance on AI contributions, see the [collaboration guidelines](https://gi
 - [Install and uninstall](#install-and-uninstall)
 - [Running it](#running-it)
 - [Opening the dashboard](#opening-the-dashboard)
+- [What the page shows](#what-the-page-shows)
 - [How the time is spent](#how-the-time-is-spent)
 - [The data as JSON](#the-data-as-json)
 - [Configuration](#configuration)
@@ -119,6 +120,40 @@ http://<server-name>:8097
 
 The port is a setting (`port` under `[server]`, below). The page needs no login: viewing is open to anyone
 who can reach it, and only the buttons are guarded (see [who can press the buttons](#who-can-press-the-buttons)).
+
+## What the page shows
+
+The page updates itself, once a second; the graphs reach back ten minutes (both settings, under
+[`[history]`](#configuration)). The button at the top right
+switches between dark and light. From the top:
+
+- **Services**: gufo and Open WebUI, each with its status (running, starting, stopping, stopped), its
+  address, and whether it listens on all interfaces or on this machine only.
+  - **Start** and **Stop**. Stop also cancels a start still in progress.
+  - When a service fails to start, or stops by itself, the reason is shown under it, with its last log
+    lines one click away.
+  - Off the trusted networks, a PIN field, if a PIN is set.
+- **Model**: the model gufo serves, its context per session, and gufo's version.
+  - A bar per session, filled as far as its context is. Hovering over a bar gives that session's speed and
+    token counts.
+  - How many sessions are busy, how many requests are waiting for one, and how full the fullest context is.
+- **Generation**: tokens per second across all sessions, with its graph; while requests run, the speed of
+  each; and the last finished request's speeds.
+- **Power and temperatures**: the socket power, CPU and GPU together, with its graph, and the CPU and GPU
+  temperatures.
+- **CPU**: the load, with its graph, and a bar per thread, grouped by physical core; the busiest thread, and
+  the load average.
+- **GPU**: the load, with its graph, and the clock.
+- **Memory**: RAM, and GTT, the part of the system memory the GPU has mapped, which is where gufo keeps the
+  model.
+- **Recent requests**: the finished chat requests, newest first: tokens in and out, the speeds, the time to
+  the first token, the duration, and why it finished.
+- **Usage**: the last 14 days, as in [how the time is spent](#how-the-time-is-spent).
+
+**Open WebUI has accounts of its own.** The first account created on it becomes its administrator, and
+sign-up then closes: so create yours before telling anyone else the address. To let the others in, open
+sign-up again (Open WebUI's admin settings, under General). A new account then waits on a "pending" screen
+until the administrator gives it a role, in the admin panel's list of users.
 
 ## How the time is spent
 
