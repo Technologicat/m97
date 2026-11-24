@@ -15,8 +15,7 @@ README's `[openwebui]` settings describe what shipped.
 - **Set up on the local AI server:** the lorebook folder and its symlink; the ledger copied from the work
   machine, the glossary being identical on both (same sha1); the three mounts; Open WebUI restarted (by
   Juha); the filter global, the tool attached to `flash-next` and readable by all users, as the model is.
-- **The live test**, and what it found, is in grimoire's `briefs/ports-brief.md`, under Open WebUI. One case
-  is still to test there: the filter's `request` hook on a later hop of a tool loop.
+- **The live test**, all of it, and what it found are in grimoire's `briefs/ports-brief.md`, under Open WebUI.
 
 Open WebUI's plugins run inside its container, where the host's files are out of reach unless mounted. The first
 plugin that needs them is [grimoire](https://github.com/Technologicat/grimoire)'s lorebook filter and tool, which

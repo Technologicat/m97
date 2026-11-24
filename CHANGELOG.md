@@ -6,6 +6,10 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
 
 ---
 
+## 0.3.1 (in progress)
+
+*No user-visible changes yet.*
+
 ## 0.3.0 — Midnight oil — 2026-11-24
 
 ### Added
