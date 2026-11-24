@@ -266,7 +266,10 @@ The settings, by table:
   container's name; `start_timeout` in seconds. The defaults serve Qwen3.8 Flash-Next as in gufo's
   quickstart.
 - **`[openwebui]`**: `image`, `volume` (the podman volume that holds accounts and chats), `port`,
-  `container`, `start_timeout`. Open WebUI is pointed at gufo's port.
+  `container`, `start_timeout`, and `mounts`: host folders mounted read-only into the container, for Open
+  WebUI's plugins to read, as `"host:container"` strings. A host path that does not exist is skipped, with
+  a warning in the log, so that a stale entry cannot keep Open WebUI from starting. Open WebUI is pointed
+  at gufo's port.
 - **`[history]`**: `seconds` the graphs reach back (600), and the sampling `interval` (1.0).
 
 m97 recognizes a service by its container name, so a container started some other way, by hand or by a

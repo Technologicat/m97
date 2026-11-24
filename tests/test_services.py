@@ -4,7 +4,7 @@ import pathlib
 import pytest
 
 from m97.services import (Service, derive_status, gufo_run_args, listen_scope, openwebui_run_args, run,
-                          parse_proc_net_tcp, start, stop)
+                          parse_proc_net_tcp, read_only_mounts, start, stop)
 from m97.settings import load
 
 SETTINGS = load(pathlib.Path("/nonexistent/settings.toml"))   # the shipped defaults
@@ -42,6 +42,27 @@ def test_openwebui_args():
     assert "HOST=0.0.0.0" in args and "PORT=3000" in args
     assert "OPENAI_API_BASE_URL=http://127.0.0.1:9090/v1" in args
     assert args[-1] == SETTINGS["openwebui"]["image"]
+    assert not any(a.endswith(":ro") for a in args)     # no mounts by default: the data volume only
+
+
+def test_openwebui_args_mounts(tmp_path):
+    (tmp_path / "lorebook").mkdir()
+    openwebui = dict(SETTINGS["openwebui"], mounts=[f"{tmp_path}/lorebook:/lorebook"])
+    args = openwebui_run_args(openwebui, SETTINGS["gufo"], lan=False)
+    assert args[-3:] == ["-v", f"{tmp_path}/lorebook:/lorebook:ro", SETTINGS["openwebui"]["image"]]
+
+
+def test_read_only_mounts(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "lorebook").mkdir()
+    (tmp_path / "with:colon").mkdir()
+    args = read_only_mounts(["~/lorebook:/lorebook",
+                             "~/missing:/missing",
+                             "~/with:colon:/inside",
+                             "nocolon"])
+    assert args == ["-v", f"{tmp_path}/lorebook:/lorebook:ro",
+                    "-v", f"{tmp_path}/with:colon:/inside:ro"]
+    assert "missing" in caplog.text and "nocolon" in caplog.text
 
 
 # --------------------------------------------------------------------------------

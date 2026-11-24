@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 
 __all__ = ["Service", "gufo_service", "openwebui_service",
-           "gufo_run_args", "openwebui_run_args",
+           "gufo_run_args", "openwebui_run_args", "read_only_mounts",
            "run", "container_state", "answers", "start", "stop",
            "follow_events", "EVENT_STATES",
            "derive_status",
@@ -85,7 +85,30 @@ def openwebui_run_args(openwebui, gufo, *, lan):
             "-e", f"WEBUI_SECRET_KEY_FILE={data}/.webui_secret_key",
             "-e", f"OPENAI_API_BASE_URL=http://127.0.0.1:{gufo['port']}/v1", "-e", "OPENAI_API_KEY=none",
             "-e", "ENABLE_OLLAMA_API=false",
+            *read_only_mounts(openwebui["mounts"]),
             openwebui["image"]]
+
+
+def read_only_mounts(specs):
+    """`-v` arguments mounting each of `specs` read-only: `"host:container"` strings, `~` expanded in the host path.
+
+    A host path that does not exist is skipped with a warning, as is a spec without both halves.
+    """
+    args = []
+    for spec in specs:
+        # Split at the last colon: the path inside the container has none, and the host path might.
+        host, _, inside = spec.rpartition(":")
+        if not host or not inside:
+            logger.warning(f"mount `{spec}`: not of the form `host:container`; not mounted")
+            continue
+        host = pathlib.Path(host).expanduser()
+        # podman refuses to start a container whose mount source is missing, and a stale entry must not
+        # keep Open WebUI down.
+        if not host.exists():
+            logger.warning(f"mount `{spec}`: {host} does not exist; not mounted")
+            continue
+        args += ["-v", f"{host}:{inside}:ro"]
+    return args
 
 
 def gufo_service(settings):

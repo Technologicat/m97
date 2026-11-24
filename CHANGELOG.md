@@ -15,6 +15,8 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
   - Hovering over a day gives each category's energy in Wh as well.
   - For scripts and agents, `/api/usage?days=N`, and a `usage` key in `/api/status`; `m97 report` prints a line for today and one for the last 7 days.
   - m97 counts it as it samples, and keeps the tally in `~/.local/state/m97/usage.json`.
+- **Host folders mounted read-only into Open WebUI**, for its plugins to read: `mounts` in `[openwebui]`, as `"host:container"` strings.
+  - A host path that does not exist is skipped, with a warning in the log, rather than keeping Open WebUI from starting.
 
 ### Fixed
 
