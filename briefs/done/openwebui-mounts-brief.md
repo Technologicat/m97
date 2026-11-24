@@ -1,5 +1,23 @@
 # Brief: read-only mounts for Open WebUI's plugins
 
+## What shipped (2026-11-24)
+
+**Done**, in m97 0.3.0 (unreleased at the time of writing). The rest of this brief is the plan as written; the
+README's `[openwebui]` settings describe what shipped.
+
+- **Built as planned:** `[openwebui] mounts` in m97, `services.read_only_mounts`, with the tests listed below;
+  `settings.toml`, the README and the changelog document it.
+- **Changed or added while building:**
+  - **A spec without both halves is skipped too**, with its own warning, as a missing host path is.
+  - **dotclaude's `open-webui-serve` reads m97's list**, the recommendation taken: `[openwebui] mounts` from
+    `~/.config/m97/settings.toml`, parsed with `python3`'s `tomllib`, the same rules as m97. With no such file
+    it mounts nothing; with a `python3` older than 3.11 it warns and mounts nothing.
+- **Set up on the local AI server:** the lorebook folder and its symlink; the ledger copied from the work
+  machine, the glossary being identical on both (same sha1); the three mounts; Open WebUI restarted (by
+  Juha); the filter global, the tool attached to `flash-next` and readable by all users, as the model is.
+- **The live test**, and what it found, is in grimoire's `briefs/ports-brief.md`, under Open WebUI. One case
+  is still to test there: the filter's `request` hook on a later hop of a tool loop.
+
 Open WebUI's plugins run inside its container, where the host's files are out of reach unless mounted. The first
 plugin that needs them is [grimoire](https://github.com/Technologicat/grimoire)'s lorebook filter and tool, which
 read a folder of Markdown definitions and the inflected forms of their terms, both on the host. This brief adds
