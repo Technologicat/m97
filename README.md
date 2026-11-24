@@ -151,9 +151,11 @@ switches between dark and light. From the top:
 - **Usage**: the last 14 days, as in [how the time is spent](#how-the-time-is-spent).
 
 **Open WebUI has accounts of its own.** The first account created on it becomes its administrator, and
-sign-up then closes: so create yours before telling anyone else the address. To let the others in, open
-sign-up again (Open WebUI's admin settings, under General). A new account then waits on a "pending" screen
-until the administrator gives it a role, in the admin panel's list of users.
+sign-up then closes: so create yours before telling anyone else the address. To let the others in:
+
+- **Create their accounts** in the admin panel's list of users, from their email addresses.
+- **Or open sign-up again** (Open WebUI's admin settings, under General). An account created that way waits on
+  a "pending" screen until the administrator gives it a role, in the same list of users.
 
 ## How the time is spent
 
