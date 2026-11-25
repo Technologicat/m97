@@ -3,7 +3,7 @@ import ipaddress
 import pytest
 
 from m97.access import (decide, is_local, make_rate_limiter, parse_active_connections, parse_addresses,
-                        pin_matches, trusted_network)
+                        pin_matches, read_token, token_matches, token_path, trusted_network, write_token)
 
 HOME_UUID = "11111111-1111-1111-1111-111111111111"
 TRAVEL_2G = "22222222-2222-2222-2222-222222222222"
@@ -117,3 +117,25 @@ def test_is_local():
     assert not is_local("192.168.50.10")
     assert not is_local("testclient")
     assert not is_local(None)
+
+
+def test_token_is_fresh_private_and_replaces_a_loose_file(tmp_path):
+    path = token_path(tmp_path / "m97" / "state.json")
+    assert path == tmp_path / "m97" / "control-token"
+    assert read_token(path) is None
+    path.parent.mkdir()
+    path.write_text("old\n")
+    path.chmod(0o644)
+    first = write_token(path)
+    assert read_token(path) == first
+    assert path.stat().st_mode & 0o777 == 0o600
+    second = write_token(str(path))
+    assert second != first and read_token(path) == second
+
+
+def test_token_matches():
+    assert token_matches("abc", "abc")
+    assert not token_matches("abc", "abd")
+    assert not token_matches("abc", None)
+    assert not token_matches(None, "")
+    assert not token_matches("", "")

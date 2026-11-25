@@ -75,6 +75,7 @@ class Hub:
 
         # How the machine's time is spent, per day; beside the state file unless told otherwise.
         self._usage_path = pathlib.Path(usage_path or pathlib.Path(self._state_path).with_name("usage.json"))
+        self.control_token = None   # written by `start`, for `POST /api/services` (see `access.write_token`)
         self.usage = usage.load_usage(self._usage_path)
         self._usage_t = None          # monotonic time of the last sample counted
         self._usage_saved_t = time.monotonic()
@@ -96,7 +97,12 @@ class Hub:
     # Lifecycle
 
     def start(self):
-        """Start the background tasks. Call from inside the running event loop."""
+        """Write the control token, and start the background tasks. Call from inside the running event loop."""
+        path = access.token_path(self._state_path)
+        try:
+            self.control_token = access.write_token(path)
+        except OSError as exc:
+            logger.warning(f"{path}: could not write the token, so `m97 gufo` and `m97 openwebui` will be refused: {exc}")
         self._tasks = [asyncio.create_task(self._sampling_loop()),
                        asyncio.create_task(services.follow_events(list(self._by_container), self._on_container)),
                        asyncio.create_task(self._network_loop())]

@@ -5,6 +5,7 @@ import urllib.request
 
 import pytest
 
+from m97.access import token_path, write_token
 from m97.cli import main, unit_file, url_line
 
 
@@ -46,20 +47,27 @@ class _FakeResponse(io.BytesIO):
         return False
 
 
-def test_service_verb_posts_to_the_running_m97(monkeypatch, tmp_path, capsys):
+@pytest.fixture
+def token(monkeypatch, tmp_path):
+    """A token where the CLI looks for it, as a running m97 would have written it."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    return write_token(token_path(tmp_path / "state" / "m97" / "state.json"))
+
+
+def test_service_verb_posts_to_the_running_m97(monkeypatch, tmp_path, capsys, token):
     seen = []
 
     def urlopen(request, timeout):
-        seen.append((request.get_method(), request.full_url, timeout))
+        seen.append((request.get_method(), request.full_url, request.get_header("Authorization"), timeout))
         return _FakeResponse(json.dumps({"status": "running", "error": None}).encode())
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     assert main(["--settings", str(tmp_path / "none.toml"), "gufo", "restart"]) == 0
-    assert seen == [("POST", "http://127.0.0.1:8097/api/services/gufo/restart", 600 + 120)]
+    assert seen == [("POST", "http://127.0.0.1:8097/api/services/gufo/restart", f"Bearer {token}", 600 + 120)]
     assert capsys.readouterr().out == "m97: restarting gufo...\nm97: gufo running\n"
 
 
-def test_service_verb_reports_an_error_and_a_refusal(monkeypatch, tmp_path, capsys):
+def test_service_verb_reports_an_error_and_a_refusal(monkeypatch, tmp_path, capsys, token):
     settings = ["--settings", str(tmp_path / "none.toml")]
 
     def failed(request, timeout):
@@ -83,6 +91,17 @@ def test_service_verb_reports_an_error_and_a_refusal(monkeypatch, tmp_path, caps
     monkeypatch.setattr(urllib.request, "urlopen", down)
     assert main([*settings, "gufo", "stop"]) == 1
     assert "Is it running?" in capsys.readouterr().err
+
+
+def test_service_verb_without_a_token_asks_nothing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+    def urlopen(request, timeout):
+        raise AssertionError("no request without a token")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert main(["--settings", str(tmp_path / "none.toml"), "gufo", "restart"]) == 1
+    assert "control-token" in capsys.readouterr().err
 
 
 def test_service_verb_needs_a_known_action():

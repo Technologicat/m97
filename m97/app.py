@@ -91,6 +91,10 @@ def build(hub):
         # For `m97 gufo restart` and the like, on the machine itself; the page's buttons go through `act`.
         if not access.is_local(request.client.host if request.client else None):
             return JSONResponse({"error": "only from the machine m97 runs on"}, status_code=403)
+        scheme, _, token = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not access.token_matches(hub.control_token, token):
+            return JSONResponse({"error": "only for the user m97 runs as: the token is missing or wrong"},
+                                status_code=403)
         if key not in hub.services or verb not in ("start", "stop", "restart"):
             return JSONResponse({"error": f"no such service or action: {key} {verb}"}, status_code=404)
         outcome = await hub.run_action(key, verb)

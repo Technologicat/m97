@@ -15,7 +15,7 @@ The package, `m97/`:
 - `cli.py`: the `m97` verbs (`serve`, `install`, `uninstall`, `start`, `stop`, `status`, `logs`, `report`,
   and `gufo` / `openwebui` with `start`, `stop` or `restart`); the systemd user unit is written by `install`.
 - `app.py`: the NiceGUI page; the read-only `GET /api/status` and `GET /api/usage`; and `POST /api/services`,
-  loopback only, which the `gufo` and `openwebui` verbs call to act through the hub as the buttons do.
+  loopback and token only, which the `gufo` and `openwebui` verbs call to act through the hub as the buttons do.
 - `report.py`: the hub's state as the JSON payload (`snapshot`), and that payload as text for `m97 report`.
 - `hub.py`: the one shared view of the machine: the sampling loop, gufo's HTTP endpoints, gufo's log,
   podman events, `nmcli monitor`, history, actions, autostart and crash reports.
@@ -54,8 +54,8 @@ change reaches it only after `systemctl --user restart m97`** (or `m97 stop` and
 - gufo and Open WebUI serve the household and the other machines. Restarting gufo means reloading a
   ~104 GiB model, about a minute with the files in page cache. Ask before restarting either of them.
 - This machine's settings are in `~/.config/m97/settings.toml` (trusted networks, PIN), the remembered
-  service state in `~/.local/state/m97/state.json`, and the usage tally beside it in `usage.json`. All
-  three are private; none goes in the repo.
+  service state in `~/.local/state/m97/state.json`, the usage tally beside it in `usage.json`, and the CLI's
+  `control-token`, rewritten at each m97 start. All are private; none goes in the repo.
 
 ## Checking the page
 

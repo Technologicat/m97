@@ -23,7 +23,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import __version__, settings as settings_module
+from . import __version__, access, intent, settings as settings_module
 
 __all__ = ["UNIT_NAME", "unit_path", "unit_file", "url_line",
            "SERVICES",
@@ -225,9 +225,16 @@ def control(args):
     url = f"http://127.0.0.1:{settings['server']['port']}/api/services/{args.service}/{args.action}"
     # The request returns when the action is done; a start may take the whole of its timeout.
     timeout = settings[args.service]["start_timeout"] + 120
+    path = access.token_path(intent.default_state_path())
+    token = access.read_token(path)
+    if token is None:
+        print(f"m97: cannot read {path}, which m97 writes when it starts. Is it running, as this user? "
+              f"'m97 status' says.", file=sys.stderr)
+        return 1
     print(f"m97: {_DOING[args.action]} {title}...", flush=True)
+    request = urllib.request.Request(url, data=b"", method="POST", headers={"Authorization": f"Bearer {token}"})
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, data=b"", method="POST"), timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:

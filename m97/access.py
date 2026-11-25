@@ -1,7 +1,8 @@
 """Who may press the buttons: anyone while the machine is on a trusted network, and elsewhere whoever knows the PIN.
 
 Viewing is always open; only starting and stopping services is gated. The `m97 gufo` and `m97 openwebui`
-commands, run on the machine itself, are allowed by `is_local` instead. A trusted network is recognized by the
+commands are allowed instead from the machine itself (`is_local`), by the user m97 runs as: they send a token
+that m97 writes at each start to a file only that user can read. A trusted network is recognized by the
 UUID of the NetworkManager connection the machine is using, optionally narrowed by a subnet. NetworkManager
 offers a saved Wi-Fi profile only to an access point with the same SSID *and* compatible security, so a WPA
 profile is not matched by an open network that borrows its name.
@@ -11,6 +12,9 @@ import dataclasses
 import hmac
 import ipaddress
 import logging
+import os
+import pathlib
+import secrets
 import subprocess
 import time
 
@@ -18,7 +22,8 @@ __all__ = ["active_connections", "parse_active_connections", "parse_addresses",
            "trusted_network",
            "pin_matches", "make_rate_limiter",
            "Decision", "decide",
-           "is_local"]
+           "is_local",
+           "token_path", "write_token", "read_token", "token_matches"]
 
 logger = logging.getLogger(__name__)
 
@@ -173,3 +178,41 @@ def is_local(host):
         return ipaddress.ip_address(host).is_loopback
     except (TypeError, ValueError):
         return False
+
+
+def token_path(state_path):
+    """Where the token goes: `control-token` beside the state file `state_path`."""
+    return pathlib.Path(state_path).with_name("control-token")
+
+
+def write_token(path):
+    """Write a fresh random token to `path`, readable by this user only, and return it.
+
+    Written to a new file and renamed into place, so an existing file with looser permissions is replaced
+    rather than reused.
+    """
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.unlink(missing_ok=True)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(token + "\n")
+    temporary.replace(path)
+    return token
+
+
+def read_token(path):
+    """The token in `path`, or `None` if the file cannot be read."""
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def token_matches(expected, given):
+    """Whether `given` is the token m97 wrote. With no token written (`expected` empty), nothing matches."""
+    if not expected:
+        return False
+    return hmac.compare_digest(expected.encode("utf-8"), (given or "").encode("utf-8"))

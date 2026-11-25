@@ -400,9 +400,9 @@ Viewing is always open. The start and stop buttons are open **while the server i
 and need the **PIN** on any other network. With no PIN set, off the trusted networks they stay locked, and
 the page says what to configure.
 
-The [`m97 gufo` and `m97 openwebui` commands](#running-it) are open to anyone on the server itself, on any
-network: m97 accepts them from the loopback address only. On a machine with several user accounts, that
-includes the other users.
+The [`m97 gufo` and `m97 openwebui` commands](#running-it) work on any network, for the user m97 runs as,
+on the server itself. m97 accepts them from the loopback address only, with a token it writes at each start
+to `~/.local/state/m97/control-token`, a file only that user can read.
 
 A trusted network is recognized by the UUID of the NetworkManager connection the server is using. List the
 saved connections and their UUIDs with:

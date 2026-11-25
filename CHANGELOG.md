@@ -12,7 +12,8 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
 
 - **Start, stop and restart the services from a shell**: `m97 gufo restart`, and likewise `start`, `stop`, and `m97 openwebui ...`.
   - They go through the running m97, as the page's buttons do, so autostart remembers the outcome. A restart counts as wanted running throughout.
-  - The command waits until the action is done, and exits with status 1 if it failed. It works on the server itself only.
+  - The command waits until the action is done, and exits with status 1 if it failed.
+  - It works on the server itself, for the user m97 runs as: m97 writes a token at each start to `~/.local/state/m97/control-token`, readable by that user only.
   - A changed `settings.toml` reaches the services only after m97 itself restarts: `m97 stop`, `m97 start`, then the restart.
 
 ## 0.3.0 — Midnight oil — 2026-11-24
