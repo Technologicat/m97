@@ -4,6 +4,8 @@ import datetime
 import socket
 import time
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
 from nicegui import app, ui
 
 from . import access, gufo, report, services, usage
@@ -74,7 +76,7 @@ def _usage_chart():
 
 
 def build(hub):
-    """Register the page and `GET /api/status`, reading everything they show from `hub`."""
+    """Register the page, `GET /api/status`, `GET /api/usage` and `POST /api/services`, all served by `hub`."""
 
     @app.get("/api/status")
     def api_status(history: int = 0):
@@ -83,6 +85,20 @@ def build(hub):
     @app.get("/api/usage")
     def api_usage(days: int = 14):
         return report.usage_report(hub.usage, days=max(1, min(days, 3660)))
+
+    @app.post("/api/services/{key}/{verb}")
+    async def api_service(key: str, verb: str, request: Request):
+        # For `m97 gufo restart` and the like, on the machine itself; the page's buttons go through `act`.
+        if not access.is_local(request.client.host if request.client else None):
+            return JSONResponse({"error": "only from the machine m97 runs on"}, status_code=403)
+        if key not in hub.services or verb not in ("start", "stop", "restart"):
+            return JSONResponse({"error": f"no such service or action: {key} {verb}"}, status_code=404)
+        outcome = await hub.run_action(key, verb)
+        if outcome is None:
+            return JSONResponse({"error": f"{hub.services[key].title} is {hub.status(key)}; try again when that is done"},
+                                status_code=409)
+        status, error = outcome
+        return {"status": status, "error": error or None}
 
     @ui.page("/")
     async def index(client):

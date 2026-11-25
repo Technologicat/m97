@@ -60,6 +60,7 @@ class Hub:
         self.action = {key: None for key in self.services}      # "start" / "stop" while m97 runs one
         self.error = {key: "" for key in self.services}         # why the last start or stop failed
         self._action_tasks = {}                                  # key -> the asyncio task of its action
+        self._restarting = set()                                 # keys being restarted: wanted running throughout
         self.note = {key: "" for key in self.services}          # e.g. "autostart", shown beside the status
 
         # What should be running, remembered across restarts (see `intent`), and why a service that should
@@ -129,21 +130,61 @@ class Hub:
     # Actions
 
     def start_service(self, key):
-        """Start a service in the background. Does nothing while a start or stop of it is under way."""
-        if self.action[key] is None:
-            self._action_tasks[key] = asyncio.create_task(self._act(key, "start"))
+        """Start a service in the background, returning the task; or `None`, doing nothing, while a start,
+        stop or restart of it is under way."""
+        if self.action[key] is not None or key in self._restarting:
+            return None
+        task = self._action_tasks[key] = asyncio.create_task(self._act(key, "start"))
+        return task
 
     def stop_service(self, key):
-        """Stop a service in the background. A start under way is cancelled first, its container removed."""
-        if self.action[key] == "stop":
-            return
-        self._action_tasks[key] = asyncio.create_task(self._stop_after_cancelling(key, self._action_tasks.get(key)))
+        """Stop a service in the background, returning the task. A start or restart under way is cancelled
+        first, its container removed; a stop under way is returned as it is."""
+        if self.action[key] == "stop" and key not in self._restarting:
+            return self._action_tasks[key]
+        task = self._action_tasks[key] = asyncio.create_task(self._stop_after_cancelling(key, self._action_tasks.get(key)))
+        return task
 
-    async def _stop_after_cancelling(self, key, maybe_start):
-        if maybe_start is not None and not maybe_start.done():
-            maybe_start.cancel()
-            await asyncio.gather(maybe_start, return_exceptions=True)
+    def restart_service(self, key):
+        """Stop a service and start it again, in the background, returning the task. A start or stop under way
+        is cancelled first; a restart under way is returned as it is. The service counts as wanted running
+        throughout, so if m97 stops in between, autostart still brings it back."""
+        if key in self._restarting:
+            return self._action_tasks[key]
+        self._restarting.add(key)
+        task = self._action_tasks[key] = asyncio.create_task(self._restart(key, self._action_tasks.get(key)))
+        return task
+
+    async def _stop_after_cancelling(self, key, maybe_task):
+        await _cancel(maybe_task)
         await self._act(key, "stop")
+
+    async def _restart(self, key, maybe_task):
+        try:
+            await _cancel(maybe_task)
+            await self._act(key, "stop")
+            if not self.error[key]:
+                await self._act(key, "start")
+        finally:
+            self._restarting.discard(key)
+
+    async def run_action(self, key, verb):
+        """Start, stop or restart a service (`verb`), and wait until that is done; for `POST /api/services`.
+
+        Returns `(status, error)`, `error` being `""` on success; or `None` for a start refused because
+        another action is under way. A start of a service already running succeeds at once, doing nothing.
+        If the caller is cancelled, the action goes on.
+        """
+        # The page disables Start while a service runs. Without this, `services.start` would refuse with an error,
+        # and `_act` would keep that like a crash report, shown if the service is stopped later.
+        if verb == "start" and self.status(key) == "running":
+            return "running", ""
+        task = {"start": self.start_service, "stop": self.stop_service, "restart": self.restart_service}[verb](key)
+        if task is None:
+            return None
+        # A later stop may cancel this action; then its own outcome is what the status and error show.
+        await asyncio.gather(asyncio.shield(task), return_exceptions=True)
+        return self.status(key), self.error[key]
 
     async def _act(self, key, verb):
         service = self.services[key]
@@ -212,7 +253,8 @@ class Hub:
         """Update what should be running from what is seen, and save it when it changes."""
         changed = False
         for key in self.services:
-            action = self.action[key] or ("start" if key in self._autostart_pending else None)
+            action = ("start" if key in self._restarting or key in self._autostart_pending
+                      else self.action[key])
             want, self._down_since[key] = intent.track(self.want[key], self._down_since[key],
                                                        running=self.container[key] == "running",
                                                        action=action, now=now)
@@ -388,6 +430,13 @@ class Hub:
                 if now > t0 and tokens >= tokens0:   # a restart resets the counter
                     self.gen_tps = (tokens - tokens0) / (now - t0)
             self._previous_tokens = (now, tokens)
+
+
+async def _cancel(maybe_task):
+    """Cancel an action task, if there is one still running, and wait until it has wound down."""
+    if maybe_task is not None and not maybe_task.done():
+        maybe_task.cancel()
+        await asyncio.gather(maybe_task, return_exceptions=True)
 
 
 def _json(text):

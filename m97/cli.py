@@ -7,6 +7,9 @@
     m97 status                 running or not, and the URL
     m97 logs [-f]              the service's log
     m97 report [--url URL]     what the dashboard shows, as text (--json for the data, --history for the graphs)
+    m97 gufo start | stop | restart
+    m97 openwebui start | stop | restart
+                               start, stop or restart a service through the running m97, as its buttons do
 """
 
 import argparse
@@ -22,7 +25,9 @@ import urllib.request
 
 from . import __version__, settings as settings_module
 
-__all__ = ["UNIT_NAME", "unit_path", "unit_file", "url_line", "main"]
+__all__ = ["UNIT_NAME", "unit_path", "unit_file", "url_line",
+           "SERVICES",
+           "main"]
 
 UNIT_NAME = "m97.service"
 
@@ -209,6 +214,43 @@ def report(args):
     return 0
 
 
+SERVICES = {"gufo": "gufo", "openwebui": "Open WebUI"}   # the service's key -> its title
+_DOING = {"start": "starting", "stop": "stopping", "restart": "restarting"}
+
+
+def control(args):
+    """Start, stop or restart a service through the running m97, and wait until that is done."""
+    settings = _load_settings(args.settings)
+    title = SERVICES[args.service]
+    url = f"http://127.0.0.1:{settings['server']['port']}/api/services/{args.service}/{args.action}"
+    # The request returns when the action is done; a start may take the whole of its timeout.
+    timeout = settings[args.service]["start_timeout"] + 120
+    print(f"m97: {_DOING[args.action]} {title}...", flush=True)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=b"", method="POST"), timeout=timeout) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            message = json.loads(exc.read().decode("utf-8"))["error"]
+        except (ValueError, KeyError, TypeError):
+            message = f"HTTP {exc.code}"
+        print(f"m97: {message}", file=sys.stderr)
+        return 1
+    except (OSError, urllib.error.URLError) as exc:
+        print(f"m97: no answer from m97 at {url}: {getattr(exc, 'reason', exc)}. Is it running? 'm97 status' says.",
+              file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print(f"\nm97: no longer waiting; m97 goes on {_DOING[args.action]} {title}, and 'm97 report' shows how it went.",
+              file=sys.stderr)
+        return 130
+    print(f"m97: {title} {result['status']}")
+    if result.get("error"):
+        print(result["error"], file=sys.stderr)
+        return 1
+    return 0
+
+
 def logs(args):
     return subprocess.run(["journalctl", "--user", "-u", UNIT_NAME, *(["-f"] if args.follow else [])]).returncode
 
@@ -243,6 +285,11 @@ def main(argv=None):
     p.add_argument("--json", action="store_true", help="print the data as JSON, unformatted")
     p.add_argument("--history", action="store_true", help="include the graphs' series (with --json)")
     p.set_defaults(run=report)
+
+    for key, title in SERVICES.items():
+        p = verbs.add_parser(key, help=f"start, stop or restart {title} through the running m97")
+        p.add_argument("action", choices=list(_DOING), help="what to do")
+        p.set_defaults(run=control, service=key)
 
     p = verbs.add_parser("logs", help="the service's log")
     p.add_argument("-f", "--follow", action="store_true", help="keep following it")

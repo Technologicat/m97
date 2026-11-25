@@ -1,3 +1,8 @@
+import io
+import json
+import urllib.error
+import urllib.request
+
 import pytest
 
 from m97.cli import main, unit_file, url_line
@@ -31,3 +36,55 @@ def test_no_verb_prints_help(capsys):
 def test_unknown_verb_is_an_error():
     with pytest.raises(SystemExit):
         main(["frobnicate"])
+
+
+class _FakeResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_service_verb_posts_to_the_running_m97(monkeypatch, tmp_path, capsys):
+    seen = []
+
+    def urlopen(request, timeout):
+        seen.append((request.get_method(), request.full_url, timeout))
+        return _FakeResponse(json.dumps({"status": "running", "error": None}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert main(["--settings", str(tmp_path / "none.toml"), "gufo", "restart"]) == 0
+    assert seen == [("POST", "http://127.0.0.1:8097/api/services/gufo/restart", 600 + 120)]
+    assert capsys.readouterr().out == "m97: restarting gufo...\nm97: gufo running\n"
+
+
+def test_service_verb_reports_an_error_and_a_refusal(monkeypatch, tmp_path, capsys):
+    settings = ["--settings", str(tmp_path / "none.toml")]
+
+    def failed(request, timeout):
+        return _FakeResponse(json.dumps({"status": "stopped", "error": "Open WebUI stopped while starting"}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", failed)
+    assert main([*settings, "openwebui", "start"]) == 1
+    assert "Open WebUI stopped while starting" in capsys.readouterr().err
+
+    def refused(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 409, "Conflict", {},
+                                     io.BytesIO(b'{"error": "gufo is stopping; try again when that is done"}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", refused)
+    assert main([*settings, "gufo", "start"]) == 1
+    assert "m97: gufo is stopping" in capsys.readouterr().err
+
+    def down(request, timeout):
+        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", down)
+    assert main([*settings, "gufo", "stop"]) == 1
+    assert "Is it running?" in capsys.readouterr().err
+
+
+def test_service_verb_needs_a_known_action():
+    with pytest.raises(SystemExit):
+        main(["gufo", "reload"])

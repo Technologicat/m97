@@ -1,6 +1,7 @@
 """Who may press the buttons: anyone while the machine is on a trusted network, and elsewhere whoever knows the PIN.
 
-Viewing is always open; only starting and stopping services is gated. A trusted network is recognized by the
+Viewing is always open; only starting and stopping services is gated. The `m97 gufo` and `m97 openwebui`
+commands, run on the machine itself, are allowed by `is_local` instead. A trusted network is recognized by the
 UUID of the NetworkManager connection the machine is using, optionally narrowed by a subnet. NetworkManager
 offers a saved Wi-Fi profile only to an access point with the same SSID *and* compatible security, so a WPA
 profile is not matched by an open network that borrows its name.
@@ -16,7 +17,8 @@ import time
 __all__ = ["active_connections", "parse_active_connections", "parse_addresses",
            "trusted_network",
            "pin_matches", "make_rate_limiter",
-           "Decision", "decide"]
+           "Decision", "decide",
+           "is_local"]
 
 logger = logging.getLogger(__name__)
 
@@ -159,3 +161,15 @@ def decide(access_settings, connections):
                     reason="Locked: this machine is not on a trusted network, and no PIN is set. To use the buttons "
                            "here, set `pin` under `[access]` in ~/.config/m97/settings.toml, or add this network "
                            "to `trusted_networks` there.")
+
+
+# --------------------------------------------------------------------------------
+# The command line
+
+def is_local(host):
+    """Whether a request from `host`, a client address as text, comes from this machine: a loopback address.
+    Anything that is not an IP address counts as remote."""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except (TypeError, ValueError):
+        return False

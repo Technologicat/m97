@@ -140,3 +140,125 @@ def test_a_running_container_is_unknown_until_its_readiness_is_checked(monkeypat
     hub._on_container("open-webui", "exited", None)
     hub._on_container("open-webui", "running", None)
     assert hub.status("openwebui") == "unknown", "a restarted container is checked afresh"
+
+
+def _gated_actions(events):
+    """A start and a stop that log themselves and wait on a gate each, so a test can look in between."""
+    gates = {"start": asyncio.Event(), "stop": asyncio.Event()}
+
+    async def start(service, *, lan):
+        events.append("start")
+        try:
+            await gates["start"].wait()
+        except asyncio.CancelledError:
+            events.append("start cancelled")
+            raise
+
+    async def stop(service):
+        events.append("stop")
+        await gates["stop"].wait()
+
+    return gates, start, stop
+
+
+def test_restart_stops_then_starts_and_stays_wanted_running(monkeypatch, tmp_path):
+    events = []
+    gates, start, stop = _gated_actions(events)
+
+    async def scenario():
+        hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
+        hub.container["gufo"] = "running"
+        hub._remember(now=0.0)
+        assert hub.want["gufo"] == "running"
+        outcome = asyncio.create_task(hub.run_action("gufo", "restart"))
+        await asyncio.sleep(0.01)
+        assert hub.status("gufo") == "stopping"
+        hub.container["gufo"] = None          # the container is gone while the restart is between its halves
+        hub._remember(now=1.0)
+        assert hub.want["gufo"] == "running", "a restart must not record the service as wanted stopped"
+        gates["stop"].set()
+        await asyncio.sleep(0.01)
+        assert hub.status("gufo") == "starting"
+        gates["start"].set()
+        return hub, await outcome
+
+    hub, outcome = asyncio.run(scenario())
+    assert events == ["stop", "start"]
+    assert outcome == ("stopped", "")       # the fake start leaves no container behind; the hub reports what it sees
+    assert hub._restarting == set()
+
+
+def test_a_plain_stop_is_recorded_as_wanted_stopped(monkeypatch, tmp_path):
+    # The control for the test above: the same moment in a stop, not a restart.
+    events = []
+    gates, start, stop = _gated_actions(events)
+
+    async def scenario():
+        hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
+        hub.container["gufo"] = "running"
+        hub._remember(now=0.0)
+        hub.stop_service("gufo")
+        await asyncio.sleep(0.01)
+        hub.container["gufo"] = None
+        hub._remember(now=1.0)
+        gates["stop"].set()
+        await asyncio.sleep(0.01)
+        return hub
+
+    assert asyncio.run(scenario()).want["gufo"] == "stopped"
+
+
+def test_stop_cancels_a_restart_and_start_is_refused_during_one(monkeypatch, tmp_path):
+    events = []
+    gates, start, stop = _gated_actions(events)
+    gates["stop"].set()
+
+    async def scenario():
+        hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
+        restart = hub.restart_service("gufo")
+        await asyncio.sleep(0.01)
+        assert hub.status("gufo") == "starting"
+        assert hub.start_service("gufo") is None
+        assert await hub.run_action("gufo", "start") is None
+        assert hub.restart_service("gufo") is restart, "a second restart joins the one under way"
+        hub.stop_service("gufo")
+        await asyncio.sleep(0.01)
+        return hub
+
+    hub = asyncio.run(scenario())
+    assert events == ["stop", "start", "start cancelled", "stop"]
+    assert hub.action["gufo"] is None
+    assert hub._restarting == set()
+
+
+def test_failed_stop_skips_the_start_of_a_restart(monkeypatch, tmp_path):
+    events = []
+
+    async def start(service, *, lan):
+        events.append("start")
+
+    async def stop(service):
+        events.append("stop")
+        return "The gufo container is still there"
+
+    hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
+    status, error = asyncio.run(hub.run_action("gufo", "restart"))
+    assert events == ["stop"]
+    assert error == "The gufo container is still there"
+
+
+def test_start_of_a_running_service_succeeds_without_acting(monkeypatch, tmp_path):
+    events = []
+
+    async def start(service, *, lan):
+        events.append("start")
+        return "gufo is already running."
+
+    async def stop(service):
+        events.append("stop")
+
+    hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
+    hub.container["gufo"], hub.ready["gufo"], hub.ready_known["gufo"] = "running", True, True
+    assert asyncio.run(hub.run_action("gufo", "start")) == ("running", "")
+    assert events == []
+    assert hub._crash["gufo"] == ""

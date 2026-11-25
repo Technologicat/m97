@@ -97,6 +97,19 @@ trusted network would listen on this machine only. gufo comes first, and Open We
 - The state is kept in `~/.local/state/m97/state.json`, beside the [usage tally](#how-the-time-is-spent). To turn autostart off, set `autostart = false` under
   `[server]`.
 
+**The services from a shell.** On the server, the running m97 starts, stops and restarts them as the
+buttons do, so autostart remembers the outcome:
+
+```bash
+m97 gufo restart             # stop gufo and start it again; it counts as wanted running throughout
+m97 gufo start | stop
+m97 openwebui start | stop | restart
+```
+
+Each waits until the action is done, and exits with status 1 if it failed. m97 reads `settings.toml` only
+when it starts, so after editing it, restart m97 first (`m97 stop`, `m97 start`; the services keep
+running), and then the service.
+
 **In the foreground**, for trying it out or for debugging. Ctrl+C stops it:
 
 ```bash
@@ -386,6 +399,10 @@ seconds = 1800                     # graphs reaching back half an hour
 Viewing is always open. The start and stop buttons are open **while the server is on a trusted network**,
 and need the **PIN** on any other network. With no PIN set, off the trusted networks they stay locked, and
 the page says what to configure.
+
+The [`m97 gufo` and `m97 openwebui` commands](#running-it) are open to anyone on the server itself, on any
+network: m97 accepts them from the loopback address only. On a machine with several user accounts, that
+includes the other users.
 
 A trusted network is recognized by the UUID of the NetworkManager connection the server is using. List the
 saved connections and their UUIDs with:

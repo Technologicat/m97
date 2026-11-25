@@ -2,8 +2,8 @@ import ipaddress
 
 import pytest
 
-from m97.access import (decide, make_rate_limiter, parse_active_connections, parse_addresses, pin_matches,
-                        trusted_network)
+from m97.access import (decide, is_local, make_rate_limiter, parse_active_connections, parse_addresses,
+                        pin_matches, trusted_network)
 
 HOME_UUID = "11111111-1111-1111-1111-111111111111"
 TRAVEL_2G = "22222222-2222-2222-2222-222222222222"
@@ -109,3 +109,11 @@ def test_decide_untrusted_without_pin_says_what_to_do(connections):
     decision = decide({"pin": "", "trusted_networks": NETWORKS}, connections)
     assert not decision.allowed and not decision.pin_required
     assert "settings.toml" in decision.reason and "pin" in decision.reason
+
+
+def test_is_local():
+    assert is_local("127.0.0.1")
+    assert is_local("::1")
+    assert not is_local("192.168.50.10")
+    assert not is_local("testclient")
+    assert not is_local(None)
