@@ -21,6 +21,10 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
   - raven-mcp is pointed at the Raven-server m97 runs. Both serve the LAN on a trusted network, like the containers.
   - One run by hand shows as running, "started outside m97", and m97 does not stop it.
   - `/api/status` gives each service its `title`, its `unit` state, and the `note` shown beside its status.
+- **The prefill under way**, for a long prompt computed afresh, say a long chat resumed after its cache is gone.
+  - The Generation card gets a line while it runs: `Prefill: 1,365 tok/s · 4,096 of 40,516 · 27 s left`.
+  - On the Model card, the session's bar shows the part still to compute in amber, with the computed part creeping across it.
+  - The same figures in `/api/status`, per session and in total, and a `prefill` line in `m97 report`.
 
 ## 0.3.0 — Midnight oil — 2026-11-24
 

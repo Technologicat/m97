@@ -7,7 +7,8 @@ import pathlib
 
 import pytest
 
-from m97.gufo import completed_request, output_tps, parse_log_line, parse_metrics, parse_slots, with_slot_rates
+from m97.gufo import (completed_request, output_tps, parse_log_line, parse_metrics, parse_slots, prefill_summary,
+                      with_slot_rates)
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -101,6 +102,20 @@ def test_slots_missing_fields():
     assert slots[2]["decoded"] is None
 
 
+def test_slots_prefilling():
+    # Taken mid-prefill on gufo 0.34.0: one chunk of a 40,410-token prompt computed, none of it cached.
+    busy, idle = parse_slots(fixture_json("prefill-slots.json"))
+    assert busy["prefilling"] and busy["task"] == 74
+    assert (busy["cached"], busy["prefill_done"], busy["prefill_total"]) == (0, 4096, 40410)
+    assert not idle["prefilling"] and idle["prefill_total"] == 0
+
+
+def test_slots_generating_are_done_prefilling():
+    # Decoding, its prompt computed: the cached part plus the processed part make the whole prompt.
+    slots = parse_slots(fixture_json("busy-slots.json"))
+    assert [slot["prefilling"] for slot in slots] == [False, False, False]
+
+
 @pytest.mark.parametrize("data", [None, {}, "text", 42])
 def test_slots_not_a_list(data):
     assert parse_slots(data) == []
@@ -151,8 +166,11 @@ def test_log_unparseable(line):
 # --------------------------------------------------------------------------------
 # Live speed per session
 
-def slot(sid, busy, decoded):
-    return {"id": sid, "busy": busy, "n_ctx": 262144, "prompt_tokens": 24, "decoded": decoded, "fill": None}
+def slot(sid, busy, decoded, *, task=7, done=24, total=24):
+    """A parsed slot: `done` of the prompt's `total` uncached tokens prefilled."""
+    return {"id": sid, "busy": busy, "task": task, "n_ctx": 262144, "prompt_tokens": 24, "decoded": decoded,
+            "fill": None, "cached": 0, "prefill_total": total, "prefill_done": done,
+            "prefilling": busy and done < total}
 
 
 def test_slot_rates():
@@ -165,6 +183,58 @@ def test_slot_rates():
     slots, previous = with_slot_rates([slot(0, False, None), slot(1, True, 25), slot(2, False, None)], previous, 12.0)
     assert slots[0]["tps"] is None and 0 not in previous, "an idle session forgets its count"
     assert slots[1]["tps"] == pytest.approx(20.0)
+
+
+def test_a_new_request_in_the_same_session_starts_over():
+    _, previous = with_slot_rates([slot(0, True, 10, task=1)], {}, 10.0)
+    slots, _ = with_slot_rates([slot(0, True, 30, task=2)], previous, 11.0)
+    assert slots[0]["tps"] is None, "another task: its count has nothing to do with the last one's"
+
+
+def prefill_run(samples, *, total=20224):
+    """`with_slot_rates` over `(time, done)` samples of one session prefilling; the slots after each."""
+    previous, out = {}, []
+    for now, done in samples:
+        slots, previous = with_slot_rates([slot(0, True, 0, done=done, total=total)], previous, now)
+        out.append(slots[0])
+    return out
+
+
+def test_prefill_speed_from_its_start_is_known_at_the_first_chunk():
+    # The shape seen on gufo 0.34.0: 4,096 tokens at a time, about 3 s apart.
+    out = prefill_run([(0.0, 0), (1.0, 0), (2.0, 0), (3.0, 4096), (4.0, 4096), (5.0, 4096), (6.0, 8192)])
+    assert [s["prefill_tps"] for s in out[:3]] == [None, None, None]
+    assert out[3]["prefill_tps"] == pytest.approx(4096 / 3)
+    assert out[4]["prefill_tps"] == pytest.approx(4096 / 3), "steady between chunks, not sagging"
+    assert out[6]["prefill_tps"] == pytest.approx(8192 / 6)
+    assert out[3]["prefill_eta_s"] == pytest.approx((20224 - 4096) / (4096 / 3))
+    assert out[5]["prefill_eta_s"] == pytest.approx(out[3]["prefill_eta_s"] - 2), "counts down between chunks"
+
+
+def test_prefill_first_seen_midway_waits_for_two_chunks():
+    out = prefill_run([(0.0, 4096), (3.0, 8192), (6.0, 12288)])
+    assert out[0]["prefill_tps"] is None and out[1]["prefill_tps"] is None, (
+        "when the first chunk began is not known, one step is not a speed")
+    assert out[2]["prefill_tps"] == pytest.approx(4096 / 3)
+
+
+def test_prefill_done_is_not_prefilling():
+    out = prefill_run([(0.0, 0), (3.0, 20224)])
+    assert not out[1]["prefilling"] and out[1]["prefill_tps"] is None
+    assert prefill_summary(out[1:]) is None
+
+
+def test_prefill_summary_of_two_sessions():
+    previous = {}
+    for now, done in ((0.0, 0), (3.0, 4096)):
+        slots, previous = with_slot_rates([slot(0, True, 0, done=done, total=8192),
+                                           slot(1, True, 0, done=done // 2, total=10000),
+                                           slot(2, True, 50)], previous, now)
+    summary = prefill_summary(slots)
+    assert summary["sessions"] == 2
+    assert (summary["done"], summary["total"]) == (4096 + 2048, 8192 + 10000)
+    assert summary["tps"] == pytest.approx(4096 / 3 + 2048 / 3)
+    assert summary["eta_s"] == pytest.approx((10000 - 2048) / (2048 / 3)), "the longest time left"
 
 
 # --------------------------------------------------------------------------------

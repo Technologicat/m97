@@ -62,7 +62,7 @@ def test_snapshot_with_gufo_ready():
     assert payload["services"]["gufo"]["url"].endswith(":8080/v1")
     assert payload["services"]["openwebui"]["url"] == "http://127.0.0.1:3000"
     assert payload["model"] == {"name": "flash-next", "gufo_version": "0.34.0", "context_tokens": 262144}
-    assert payload["generation"] == {"tps": 51.0, "deferred": 0.0}
+    assert payload["generation"] == {"tps": 51.0, "deferred": 0.0, "prefill": None}
     assert payload["sessions"][0]["generated_tokens"] == 180
     assert payload["host"]["cpu_thread_pct"] == {"0": 3.0, "16": 74.0}
     assert payload["host"]["cpu_temp_c"] is None, "a missing sensor is null"
@@ -101,6 +101,20 @@ def test_format_report():
     assert "busiest thread 74 %" in text
     assert "17 → 838 tokens" in text and "(40.4 decoding)" in text
     assert "cached" in text
+    assert "prefill     " not in text, "nothing is prefilling"
+
+
+def test_prefill_in_the_snapshot_and_the_report():
+    hub = make_hub()
+    hub.slots[1] = {"id": 1, "busy": True, "n_ctx": 262144, "prompt_tokens": 20224, "decoded": 0, "tps": None,
+                    "fill": 20224 / 262144, "cached": 0, "prefill_total": 20224, "prefill_done": 8192,
+                    "prefilling": True, "prefill_tps": 1365.33, "prefill_eta_s": 8.81}
+    payload = report.snapshot(hub)
+    assert payload["generation"]["prefill"] == {"sessions": 1, "done": 8192, "total": 20224, "tps": 1365,
+                                                "eta_s": 9}
+    assert payload["sessions"][1]["prefilling"] and payload["sessions"][1]["prefill_tps"] == 1365
+    assert payload["sessions"][0]["prefilling"] is False, "a slot from before the prefill fields reads as not"
+    assert "prefill     1,365 tok/s, 8,192 of 20,224 tokens, 9 s left" in report.format_report(payload)
 
 
 def test_format_report_with_gufo_down_shows_only_the_summary():

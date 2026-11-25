@@ -23,7 +23,7 @@ DECIMALS = {"ppt_w": 1, "cpu_temp_c": 0, "gpu_temp_c": 0, "gpu_busy_pct": 0, "gp
             "load1": 2, "ram_used_gib": 1, "ram_total_gib": 0, "gtt_used_gib": 1, "gtt_total_gib": 0,
             "gen_tps": 1, "tps": 1, "output_tps": 1, "decode_tps": 1, "prefill_tps": 0, "first_token_s": 2,
             "duration_s": 1, "thread_pct": 0, "fill": 3,   # fill: a fraction, so 3 decimals is the page's 0.1 %
-            "hours": 1, "wh": 0}
+            "hours": 1, "wh": 0, "eta_s": 0}
 
 
 def _round(value, key):
@@ -116,11 +116,19 @@ def snapshot(hub, *, history=False):
                             "gufo_version": (props.get("build_info") or "").split(" ")[0] or None,
                             "context_tokens": (props.get("default_generation_settings") or {}).get("n_ctx")}
         maybe_deferred = hub.metrics.get("llamacpp:requests_deferred")
+        prefill = gufo.prefill_summary(hub.slots)
         payload["generation"] = {"tps": _round(hub.gen_tps, "gen_tps"),
-                                 "deferred": None if maybe_deferred is None else int(maybe_deferred)}
+                                 "deferred": None if maybe_deferred is None else int(maybe_deferred),
+                                 "prefill": None if prefill is None else
+                                 dict(prefill, tps=_round(prefill["tps"], "prefill_tps"),
+                                      eta_s=_round(prefill["eta_s"], "eta_s"))}
         payload["sessions"] = [{"id": s["id"], "busy": s["busy"], "tps": _round(s.get("tps"), "tps"),
                                 "prompt_tokens": s["prompt_tokens"], "generated_tokens": s["decoded"],
-                                "context_tokens": s["n_ctx"], "fill": _round(s["fill"], "fill")}
+                                "context_tokens": s["n_ctx"], "fill": _round(s["fill"], "fill"),
+                                "prefilling": s.get("prefilling", False),
+                                "prefill_done": s.get("prefill_done"), "prefill_total": s.get("prefill_total"),
+                                "prefill_tps": _round(s.get("prefill_tps"), "prefill_tps"),
+                                "prefill_eta_s": _round(s.get("prefill_eta_s"), "eta_s")}
                                for s in hub.slots]
     if history:
         now = time.monotonic()
@@ -180,6 +188,13 @@ def format_report(payload):
         if payload["generation"]["deferred"]:
             parts.append(f"{payload['generation']['deferred']:.0f} waiting")
         lines.append("generation  " + "; ".join(parts))
+        prefill = payload["generation"].get("prefill")   # an older m97 sends none
+        if prefill:
+            parts = [f"{prefill['tps']:,} tok/s" if prefill["tps"] is not None else None,
+                     f"{prefill['done']:,} of {prefill['total']:,} tokens",
+                     f"{prefill['eta_s']} s left" if prefill["eta_s"] is not None else None,
+                     f"{prefill['sessions']} sessions" if prefill["sessions"] > 1 else None]
+            lines.append("prefill     " + ", ".join(part for part in parts if part))
 
     h = payload["host"]
     threads = [pct for pct in (h.get("cpu_thread_pct") or {}).values() if pct is not None]

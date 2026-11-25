@@ -157,11 +157,15 @@ switches between dark and light. From the top:
     lines one click away.
   - Off the trusted networks, a PIN field, if a PIN is set.
 - **Model**: the model gufo serves, its context per session, and gufo's version.
-  - A bar per session, filled as far as its context is. Hovering over a bar gives that session's speed and
-    token counts.
+  - A bar per session, filled as far as its context is. While a prompt is prefilled, the part still to
+    compute is amber, and the computed part creeps across it. Hovering over a bar gives that session's speed
+    and token counts.
   - How many sessions are busy, how many requests are waiting for one, and how full the fullest context is.
 - **Generation**: tokens per second across all sessions, with its graph; while requests run, the speed of
-  each; and the last finished request's speeds.
+  each; while a prompt is prefilled, the prefill's speed, how far it has got, and the time left; and the last
+  finished request's speeds.
+  - The prefill speed is averaged over the prefill so far, since gufo reports its progress a chunk of 4,096
+    tokens at a time. It shows from the first chunk on.
 - **Power and temperatures**: the socket power, CPU and GPU together, with its graph, and the CPU and GPU
   temperatures.
 - **CPU**: the load, with its graph, and a bar per thread, grouped by physical core: a column per core, its
@@ -234,9 +238,11 @@ m97 report --json [--history]                # the JSON, unformatted
   starts, before it has asked), the `container` state for a container or the `unit` state for a systemd unit
   (`running`, `failed`, `outside` for one started outside m97, or `null`), the `note` the page shows beside the
   status, the `url`, the `scope` it listens on (`all`, `local`, or `null` when not listening), and any `error`.
-- **`model`** (`name`, `gufo_version`, `context_tokens`), **`generation`** (total `tps`, requests `deferred`)
+- **`model`** (`name`, `gufo_version`, `context_tokens`), **`generation`** (total `tps`, requests `deferred`,
+  and the `prefill` under way: `sessions`, tokens `done` of `total`, `tps`, `eta_s`; `null` when none is)
   and **`sessions`** (per session: `busy`, live `tps`, `prompt_tokens`, `generated_tokens`, `context_tokens`,
-  and the context `fill` from 0 to 1). `null` or empty while gufo is not ready.
+  the context `fill` from 0 to 1, and `prefilling`, `prefill_done`, `prefill_total`, `prefill_tps`,
+  `prefill_eta_s`). `null` or empty while gufo is not ready.
 - **`host`**: the sensors, with units in the key names (`ppt_w`, `cpu_temp_c`, `gpu_busy_pct`, `ram_used_gib`
   …), per-thread CPU load in `cpu_thread_pct`, and `cpu_cores`, the threads grouped by physical core.
 - **`requests`**: the recent finished requests, newest first, with `output_tps` (the speed delivered,
