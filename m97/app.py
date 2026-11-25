@@ -21,9 +21,11 @@ STATUS_COLORS = {"running": ("#15803d", "#ffffff"),
                  "unknown": ("#475569", "#ffffff")}
 
 
-# The part of a session's bar still to prefill: the starting badge's amber, at 60 % so the bar's own purple
-# stays the stronger colour.
-PREFILL_COLOR = "rgba(242,192,55,.6)"
+# A busy session's bar, in the usage chart's purples: the context in use in serving's light purple, the part
+# of a prompt still to prefill in the darker one, and the free rest in that at 30 %.
+CONTEXT_USED = "#b4aaf7"
+CONTEXT_PREFILL = "#7c6cf0"
+CONTEXT_FREE = "rgba(124,108,240,.3)"
 
 
 def _fmt(value, spec, unit=""):
@@ -334,19 +336,19 @@ def build(hub):
             for (bar, tip), slot in zip(session_bars, hub.slots):
                 # A busy session's bar is filled as far as its context is: a request running away in a loop
                 # shows as a bar creeping across. While its prompt is prefilled, the part still to compute is
-                # amber, and the computed part creeps across it.
+                # the darker purple, and the computed part creeps across it.
                 if not slot["busy"]:
                     background = "rgba(128,128,128,.25)"
                 elif slot["fill"] is None:
-                    background = "#7c6cf0"
+                    background = CONTEXT_USED
                 elif slot["prefilling"] and slot["n_ctx"]:
                     edge = max(2.0, 100 * (slot["cached"] + slot["prefill_done"]) / slot["n_ctx"])
                     end = max(edge, 100 * slot["fill"])
-                    background = (f"linear-gradient(to right, #7c6cf0 {edge:.1f}%, {PREFILL_COLOR} {edge:.1f}%, "
-                                  f"{PREFILL_COLOR} {end:.1f}%, rgba(124,108,240,.3) {end:.1f}%)")
+                    background = (f"linear-gradient(to right, {CONTEXT_USED} {edge:.1f}%, {CONTEXT_PREFILL} {edge:.1f}%, "
+                                  f"{CONTEXT_PREFILL} {end:.1f}%, {CONTEXT_FREE} {end:.1f}%)")
                 else:
                     edge = max(2.0, 100 * slot["fill"])   # a sliver even when nearly empty, to read as busy
-                    background = f"linear-gradient(to right, #7c6cf0 {edge:.1f}%, rgba(124,108,240,.3) {edge:.1f}%)"
+                    background = f"linear-gradient(to right, {CONTEXT_USED} {edge:.1f}%, {CONTEXT_FREE} {edge:.1f}%)"
                 bar.style(f"background: {background}")
                 if slot["prefilling"]:
                     progress = _prefill_text(slot["prefill_done"], slot["prefill_total"], slot["prefill_tps"],

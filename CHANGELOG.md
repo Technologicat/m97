@@ -23,7 +23,7 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
   - `/api/status` gives each service its `title`, its `unit` state, and the `note` shown beside its status.
 - **The prefill under way**, for a long prompt computed afresh, say a long chat resumed after its cache is gone.
   - The Generation card gets a line while it runs: `Prefill: 1,365 tok/s · 4,096 of 40,516 · 27 s left`.
-  - On the Model card, the session's bar shows the part still to compute in amber, with the computed part creeping across it.
+  - On the Model card, the session's bar shows the part still to compute in a darker purple, with the computed part creeping across it.
   - The same figures in `/api/status`, per session and in total, and a `prefill` line in `m97 report`.
 
 ## 0.3.0 — Midnight oil — 2026-11-24

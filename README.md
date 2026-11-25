@@ -158,7 +158,7 @@ switches between dark and light. From the top:
   - Off the trusted networks, a PIN field, if a PIN is set.
 - **Model**: the model gufo serves, its context per session, and gufo's version.
   - A bar per session, filled as far as its context is. While a prompt is prefilled, the part still to
-    compute is amber, and the computed part creeps across it. Hovering over a bar gives that session's speed
+    compute is a darker purple, and the computed part creeps across it. Hovering over a bar gives that session's speed
     and token counts.
   - How many sessions are busy, how many requests are waiting for one, and how full the fullest context is.
 - **Generation**: tokens per second across all sessions, with its graph; while requests run, the speed of
