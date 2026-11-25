@@ -401,8 +401,8 @@ Then restart m97, and each gets a row on the page and its `m97 raven-server` or 
 - **A program run by hand** on the service's port shows as running, "started outside m97", and m97 leaves it
   alone. Stop it where it was started before starting it from m97.
 
-**To give Open WebUI's model the tools**, add raven-mcp in Open WebUI's admin settings as an MCP server
-(Streamable HTTP), at `http://127.0.0.1:8130/mcp`. Open WebUI runs on the host's network, so the loopback
+**To give Open WebUI's model the tools**, add raven-mcp in Open WebUI's Admin Panel, under Settings ›
+Integrations, as an MCP server (Streamable HTTP) at `http://127.0.0.1:8130/mcp`. Open WebUI runs on the host's network, so the loopback
 address reaches raven-mcp wherever it listens.
 
 A fuller file, with a key or more from every table. Its mounts are for
