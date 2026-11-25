@@ -106,7 +106,9 @@ m97 gufo start | stop
 m97 openwebui start | stop | restart
 ```
 
-Each waits until the action is done, and exits with status 1 if it failed. m97 reads `settings.toml` only
+Each waits until the action is done, and exits with status 1 if it failed. One still waiting when m97 itself
+restarts loses its answer and exits with status 1 too; `m97 report` shows where the service got to, and the
+command can be run again. m97 reads `settings.toml` only
 when it starts, so after editing it, restart m97 first (`m97 stop`, `m97 start`; the services keep
 running), and then the service.
 
