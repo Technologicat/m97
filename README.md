@@ -156,8 +156,8 @@ switches between dark and light. From the top:
   each; and the last finished request's speeds.
 - **Power and temperatures**: the socket power, CPU and GPU together, with its graph, and the CPU and GPU
   temperatures.
-- **CPU**: the load, with its graph, and a bar per thread, grouped by physical core; the busiest thread, and
-  the load average.
+- **CPU**: the load, with its graph, and a bar per thread, grouped by physical core: a column per core, its
+  threads one above the other, 16 columns to a row; the busiest thread, and the load average.
 - **GPU**: the load, with its graph, and the clock.
 - **Memory**: RAM, and GTT, the part of the system memory the GPU has mapped, which is where gufo keeps the
   model.
