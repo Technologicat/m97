@@ -89,8 +89,11 @@ def snapshot(hub, *, history=False):
         "time": _iso(datetime.datetime.now(datetime.UTC)),
         "hostname": socket.gethostname(),
         "network": {"trusted": access.allowed, "name": access.network},
-        "services": {key: {"status": hub.status(key),
-                           "container": hub.container[key],
+        "services": {key: {"title": service.title,
+                           "status": hub.status(key),
+                           "container": hub.state[key] if service.container else None,
+                           "unit": hub.state[key] if service.unit else None,
+                           "note": services.state_note(service, hub.state[key]) or None,
                            "url": services.service_url(service, hub.scope[key]),
                            "scope": hub.scope[key],
                            "error": (hub.error[key] or hub.problem[key]) or None}
@@ -139,7 +142,8 @@ def _fmt(value, spec, unit=""):
 def _service_line(title, service):
     where = {"all": "all interfaces", "local": "this machine only"}.get(service["scope"])
     address = f"   {service['url']} ({where})" if service["url"] else ""
-    line = f"{title:<11} {service['status']:<9}{address}"
+    note = f" ({service['note']})" if service.get("note") else ""   # an older m97 sends none
+    line = f"{title:<11} {service['status']:<9}{address}{note}"
     if service["error"]:
         line += "\n" + " " * 12 + service["error"].partition("\n\n")[0]   # the summary, not the log lines
     return line
@@ -150,8 +154,9 @@ def format_report(payload):
     network = payload["network"]
     where = f'trusted network "{network["name"]}"' if network["trusted"] else "not on a trusted network"
     lines = [f"m97 {payload['m97_version']} on {payload['hostname']} — {where}"]
-    titles = {"gufo": "gufo", "openwebui": "Open WebUI"}
-    lines += [_service_line(titles.get(key, key), service) for key, service in payload["services"].items()]
+    titles = {"gufo": "gufo", "openwebui": "Open WebUI"}   # for an older m97, which sends no title
+    lines += [_service_line(service.get("title") or titles.get(key, key), service)
+              for key, service in payload["services"].items()]
 
     model = payload["model"]
     if model is None:

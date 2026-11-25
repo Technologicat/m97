@@ -9,7 +9,9 @@
 A web dashboard and control panel for a [gufo](https://github.com/gufo-org/gufo) LLM server on AMD Strix
 Halo: what the machine and the model are doing — power, temperatures, memory, GPU and CPU load, generation
 speed, recent requests, how the machine's time is spent day by day — and buttons to start and stop gufo and [Open WebUI](https://github.com/open-webui/open-webui),
-for the people in the household who never open a shell.
+for the people in the household who never open a shell. Optionally, it runs
+[Raven](https://github.com/Technologicat/raven)'s server and its MCP server too, which give Open WebUI's
+model web search and page fetch.
 
 ![The m97 dashboard while gufo serves two chat requests](https://raw.githubusercontent.com/Technologicat/m97/main/docs/media/dashboard.png)
 
@@ -87,7 +89,8 @@ loginctl enable-linger "$USER"
 
 **Autostart.** m97 remembers which services were running, and when it starts, say at boot, it starts
 them again. It waits for the network first, since a service started before the machine has joined a
-trusted network would listen on this machine only. gufo comes first, and Open WebUI once gufo is up.
+trusted network would listen on this machine only. gufo comes first, and Open WebUI once gufo is up;
+likewise Raven-server, and raven-mcp once Raven-server is up.
 
 - A service counts as wanted running once m97 sees it running, however it was started: from the page, or
   from a shell. It counts as wanted stopped once it has been down for half a minute while m97 runs.
@@ -104,6 +107,8 @@ buttons do, so autostart remembers the outcome:
 m97 gufo restart             # stop gufo and start it again; it counts as wanted running throughout
 m97 gufo start | stop
 m97 openwebui start | stop | restart
+m97 raven-server start | stop | restart    # once set up; see Raven, under Configuration
+m97 raven-mcp start | stop | restart
 ```
 
 Each waits until the action is done, and exits with status 1 if it failed. One still waiting when m97 itself
@@ -142,9 +147,12 @@ The page updates itself, once a second; the graphs reach back ten minutes (both 
 [`[history]`](#configuration)). The button at the top right
 switches between dark and light. From the top:
 
-- **Services**: gufo and Open WebUI, each with its status (running, starting, stopping, stopped), its
-  address, and whether it listens on all interfaces or on this machine only.
+- **Services**: gufo and Open WebUI, and Raven-server and raven-mcp if [set up](#raven-optional), each with
+  its status (running, starting, stopping, stopped), its address, and whether it listens on all interfaces
+  or on this machine only.
   - **Start** and **Stop**. Stop also cancels a start still in progress.
+  - A Raven service run by hand, outside m97, shows as running, with the note "started outside m97". m97
+    does not stop it: Stop says to stop it where it was started.
   - When a service fails to start, or stops by itself, the reason is shown under it, with its last log
     lines one click away.
   - Off the trusted networks, a PIN field, if a PIN is set.
@@ -221,9 +229,11 @@ m97 report --json [--history]                # the JSON, unformatted
   added.
 - **`m97_version`**, **`time`** (ISO 8601, UTC), **`hostname`**, **`network`** (`trusted`, and the trusted
   network's `name`).
-- **`services`**: for `gufo` and `openwebui`, the `status` the page shows (`running`, `starting`, `stopping`,
-  `stopped`, or `unknown` for the moment after m97 starts, before it has asked), the `container` state, the `url`, the
-  `scope` it listens on (`all`, `local`, or `null` when not listening), and any `error`.
+- **`services`**: for `gufo` and `openwebui`, and `raven-server` and `raven-mcp` if set up, the `title`, the
+  `status` the page shows (`running`, `starting`, `stopping`, `stopped`, or `unknown` for the moment after m97
+  starts, before it has asked), the `container` state for a container or the `unit` state for a systemd unit
+  (`running`, `failed`, `outside` for one started outside m97, or `null`), the `note` the page shows beside the
+  status, the `url`, the `scope` it listens on (`all`, `local`, or `null` when not listening), and any `error`.
 - **`model`** (`name`, `gufo_version`, `context_tokens`), **`generation`** (total `tps`, requests `deferred`)
   and **`sessions`** (per session: `busy`, live `tps`, `prompt_tokens`, `generated_tokens`, `context_tokens`,
   and the context `fill` from 0 to 1). `null` or empty while gufo is not ready.
@@ -251,10 +261,10 @@ request:
   "hostname": "ai-server",
   "network": {"trusted": true, "name": "home"},
   "services": {
-    "gufo": {"status": "running", "container": "running", "url": "http://ai-server:8080/v1",
-             "scope": "all", "error": null},
-    "openwebui": {"status": "running", "container": "running", "url": "http://ai-server:3000",
-                  "scope": "all", "error": null}
+    "gufo": {"title": "gufo", "status": "running", "container": "running", "unit": null, "note": null,
+             "url": "http://ai-server:8080/v1", "scope": "all", "error": null},
+    "openwebui": {"title": "Open WebUI", "status": "running", "container": "running", "unit": null,
+                  "note": null, "url": "http://ai-server:3000", "scope": "all", "error": null}
   },
   "model": {"name": "flash-next", "gufo_version": "0.34.0", "context_tokens": 262144},
   "generation": {"tps": 60.0, "deferred": 0},
@@ -353,10 +363,47 @@ The settings, by table:
   WebUI's plugins to read, as `"host:container"` strings. A host path that does not exist is skipped, with
   a warning in the log, so that a stale entry cannot keep Open WebUI from starting. Open WebUI is pointed
   at gufo's port.
+- **`[raven-server]`** and **`[raven-mcp]`**: `command`, empty by default, which leaves the service off; `unit`,
+  the systemd unit's name; `port`; `extra_args`; `start_timeout`. See [Raven](#raven-optional), below.
 - **`[history]`**: `seconds` the graphs reach back (600), and the sampling `interval` (1.0).
 
 m97 recognizes a service by its container name, so a container started some other way, by hand or by a
 script, shows up on the page as long as the name matches.
+
+### Raven, optional
+
+[Raven](https://github.com/Technologicat/raven) is a set of local AI apps. Two of its programs can run under m97:
+
+- **Raven-server**, which serves specialized AI models, and does Raven's web search and page fetch.
+- **raven-mcp**, Raven's MCP server, which offers those tools, and Raven's lorebook, to LLM frontends over
+  the [Model Context Protocol](https://modelcontextprotocol.io/). Without Raven-server it still starts, and
+  its web tools answer that the web is unavailable.
+
+Both are off unless set up. To set them up, install Raven, and give each its program in Raven's venv:
+
+```toml
+[raven-server]
+command = "~/Documents/koodit/raven/.venv/bin/raven-server"
+
+[raven-mcp]
+command = "~/Documents/koodit/raven/.venv/bin/raven-mcp"
+```
+
+Then restart m97, and each gets a row on the page and its `m97 raven-server` or `m97 raven-mcp` command.
+
+- **They are host processes, not containers.** m97 runs each as a transient systemd user unit,
+  `m97-raven-server` and `m97-raven-mcp`, so they keep running across a restart of m97, like the
+  containers. A unit's log is in the journal: `journalctl --user -u m97-raven-mcp`.
+- **raven-mcp is pointed at the Raven-server m97 runs**, on its port. With only raven-mcp set up, it uses
+  the Raven-server in Raven's own settings.
+- **On a trusted network both serve the LAN**, like the containers; elsewhere this machine only. raven-mcp
+  serves at `http://<server-name>:8130/mcp`, the address to give an MCP client.
+- **A program run by hand** on the service's port shows as running, "started outside m97", and m97 leaves it
+  alone. Stop it where it was started before starting it from m97.
+
+**To give Open WebUI's model the tools**, add raven-mcp in Open WebUI's admin settings as an MCP server
+(Streamable HTTP), at `http://127.0.0.1:8130/mcp`. Open WebUI runs on the host's network, so the loopback
+address reaches raven-mcp wherever it listens.
 
 A fuller file, with a key or more from every table. Its mounts are for
 [grimoire](https://github.com/Technologicat/grimoire), which gives Open WebUI's model the definitions of your
@@ -402,7 +449,7 @@ Viewing is always open. The start and stop buttons are open **while the server i
 and need the **PIN** on any other network. With no PIN set, off the trusted networks they stay locked, and
 the page says what to configure.
 
-The [`m97 gufo` and `m97 openwebui` commands](#running-it) work on any network, for the user m97 runs as,
+The [`m97 gufo`, `m97 openwebui` and Raven commands](#running-it) work on any network, for the user m97 runs as,
 on the server itself. m97 accepts them from the loopback address only, with a token it writes at each start
 to `~/.local/state/m97/control-token`, a file only that user can read.
 
@@ -441,7 +488,8 @@ Everything without root:
 - **Its own samples, added up per day**, for the usage tally. Besides that, all m97 keeps on disk is which
   services should run, and the report of any that stopped by itself.
 - **Container state** from `podman events`, and **the network** from `nmcli monitor`, so m97 starts no
-  processes periodically. It takes about 0.5 % of one CPU core, plus about 0.1 % per open page (measured
+  processes periodically. A Raven service's unit state comes from `systemctl --user show`, asked only when
+  its port opens or closes. It takes about 0.5 % of one CPU core, plus about 0.1 % per open page (measured
   on the server above).
 
 ## Development

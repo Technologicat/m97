@@ -21,7 +21,7 @@ def make_hub(*, ready=True):
     hub = types.SimpleNamespace(
         access=Decision(allowed=True, pin_required=False, reason="", network="home"),
         services={"gufo": gufo, "openwebui": owui},
-        container={"gufo": "running" if ready else None, "openwebui": "running"},
+        state={"gufo": "running" if ready else None, "openwebui": "running"},
         ready={"gufo": ready, "openwebui": True},
         scope={"gufo": "all" if ready else None, "openwebui": "local"},
         error={"gufo": "", "openwebui": ""},

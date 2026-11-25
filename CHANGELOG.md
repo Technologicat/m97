@@ -15,6 +15,12 @@ This project adheres to [semantic versioning](https://semver.org/). Dates are IS
   - The command waits until the action is done, and exits with status 1 if it failed.
   - It works on the server itself, for the user m97 runs as: m97 writes a token at each start to `~/.local/state/m97/control-token`, readable by that user only.
   - A changed `settings.toml` reaches the services only after m97 itself restarts: `m97 stop`, `m97 start`, then the restart.
+- **Raven-server and raven-mcp as optional services**, for [Raven](https://github.com/Technologicat/raven)'s web search, page fetch and lorebook over MCP, for Open WebUI and other LLM frontends. Off unless their `command` is set in `[raven-server]` and `[raven-mcp]`.
+  - Each gets a row on the page, autostart, crash reports, and `m97 raven-server` / `m97 raven-mcp` with `start`, `stop` or `restart`. Autostart brings up Raven-server first.
+  - They run as transient systemd user units, `m97-raven-server` and `m97-raven-mcp`, so they keep running across a restart of m97; their logs are in the journal.
+  - raven-mcp is pointed at the Raven-server m97 runs. Both serve the LAN on a trusted network, like the containers.
+  - One run by hand shows as running, "started outside m97", and m97 does not stop it.
+  - `/api/status` gives each service its `title`, its `unit` state, and the `note` shown beside its status.
 
 ## 0.3.0 — Midnight oil — 2026-11-24
 

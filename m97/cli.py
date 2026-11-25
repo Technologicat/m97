@@ -9,7 +9,10 @@
     m97 report [--url URL]     what the dashboard shows, as text (--json for the data, --history for the graphs)
     m97 gufo start | stop | restart
     m97 openwebui start | stop | restart
-                               start, stop or restart a service through the running m97, as its buttons do
+    m97 raven-server start | stop | restart
+    m97 raven-mcp start | stop | restart
+                               start, stop or restart a service through the running m97, as its buttons do;
+                               the Raven ones once set up in the settings
 """
 
 import argparse
@@ -214,7 +217,8 @@ def report(args):
     return 0
 
 
-SERVICES = {"gufo": "gufo", "openwebui": "Open WebUI"}   # the service's key -> its title
+# The service's key, which is also its settings table, -> its title.
+SERVICES = {"gufo": "gufo", "openwebui": "Open WebUI", "raven-server": "Raven-server", "raven-mcp": "raven-mcp"}
 _DOING = {"start": "starting", "stop": "stopping", "restart": "restarting"}
 
 
@@ -222,6 +226,10 @@ def control(args):
     """Start, stop or restart a service through the running m97, and wait until that is done."""
     settings = _load_settings(args.settings)
     title = SERVICES[args.service]
+    if "command" in settings[args.service] and not settings[args.service]["command"]:
+        print(f"m97: {title} is not set up: give its `command` in the [{args.service}] table of {args.settings}, "
+              f"then restart m97.", file=sys.stderr)
+        return 1
     url = f"http://127.0.0.1:{settings['server']['port']}/api/services/{args.service}/{args.action}"
     # The request returns when the action is done; a start may take the whole of its timeout.
     timeout = settings[args.service]["start_timeout"] + 120

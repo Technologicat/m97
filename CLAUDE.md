@@ -6,20 +6,22 @@ Guidance for Claude Code working in this repository. Fleet-wide conventions live
 ## What m97 is
 
 A web dashboard and control panel for a gufo LLM server on AMD Strix Halo: what the machine and the model
-are doing, and buttons to start and stop gufo and Open WebUI, for people who never open a shell. Built for
+are doing, and buttons to start and stop gufo and Open WebUI (and optionally Raven-server and raven-mcp),
+for people who never open a shell. Built for
 the fleet's local AI server, and public because other gufo users may want it. The README is the user's
 manual; [`briefs/done/dashboard.md`](briefs/done/dashboard.md) records the design and the decisions behind it.
 
 The package, `m97/`:
 
 - `cli.py`: the `m97` verbs (`serve`, `install`, `uninstall`, `start`, `stop`, `status`, `logs`, `report`,
-  and `gufo` / `openwebui` with `start`, `stop` or `restart`); the systemd user unit is written by `install`.
+  and `gufo` / `openwebui` / `raven-server` / `raven-mcp` with `start`, `stop` or `restart`); the systemd user unit is written by `install`.
 - `app.py`: the NiceGUI page; the read-only `GET /api/status` and `GET /api/usage`; and `POST /api/services`,
-  loopback and token only, which the `gufo` and `openwebui` verbs call to act through the hub as the buttons do.
+  loopback and token only, which the service verbs call to act through the hub as the buttons do.
 - `report.py`: the hub's state as the JSON payload (`snapshot`), and that payload as text for `m97 report`.
 - `hub.py`: the one shared view of the machine: the sampling loop, gufo's HTTP endpoints, gufo's log,
-  podman events, `nmcli monitor`, history, actions, autostart and crash reports.
-- `services.py`: the podman command lines, start and stop, the event follower, where a service listens.
+  podman events, the units' ports, `nmcli monitor`, history, actions, autostart and crash reports.
+- `services.py`: the services: the containers' podman command lines and the units' (Raven's, run with
+  `systemd-run --user`), start and stop, the podman event follower, where a service listens.
 - `gufo.py`: parsers for gufo's metrics, `/slots` and log lines, plus the derived speeds.
 - `sensors.py`: the sysfs and procfs sampler, and the CPU topology.
 - `usage.py`: the per-day tally of how the time is spent: the category of a sample, the accounting, the file,
@@ -84,6 +86,11 @@ nodes with `ai-server`, and check that `document.body.innerText` no longer conta
 - **gufo's speed gauges are not averages.** `predicted_tokens_seconds` and `prompt_tokens_seconds` hold the
   last finished request's figures, and the log's `decode_tps` leaves out time a request waits while another
   session is served. The live total comes from the change in `tokens_predicted_total`.
+- **systemd emits a unit's `PropertiesChanged` signals only while some client has called `Subscribe()` and
+  stays connected.** `busctl --user monitor` alone sees nothing, and `busctl call ... Subscribe` exits at
+  once, dropping the subscription (both checked 2026-11-25). Following units by D-Bus would need m97 to hold
+  a connection itself, a new dependency (`jeepney`); so a unit's port opening or closing is the trigger, and
+  `systemctl --user show` is asked then.
 - **The page must not start processes on a timer.** Container state comes from `podman events` and the
   network from `nmcli monitor`; an `nmcli` call per refresh per tab was the one regression of this kind so
   far. Measure with `/proc/<pid>/stat` over 30 s before and after anything that might add load: about

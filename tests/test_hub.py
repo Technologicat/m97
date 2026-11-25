@@ -1,13 +1,17 @@
 import asyncio
 
 from m97 import hub as hub_module
-from m97.settings import load
+from m97.settings import load, merge
 
 
-def make_hub(monkeypatch, tmp_path, *, start, stop):
+RAVEN = {"raven-server": {"command": "/opt/raven/raven-server"}, "raven-mcp": {"command": "/opt/raven/raven-mcp"}}
+
+
+def make_hub(monkeypatch, tmp_path, *, start, stop, overrides=None):
     monkeypatch.setattr(hub_module.services, "start", start)
     monkeypatch.setattr(hub_module.services, "stop", stop)
-    hub = hub_module.Hub(load("/nonexistent/settings.toml"), state_path=tmp_path / "state.json")
+    settings = merge(load("/nonexistent/settings.toml"), overrides or {})
+    hub = hub_module.Hub(settings, state_path=tmp_path / "state.json")
 
     async def decision():
         return hub.access
@@ -67,11 +71,11 @@ def test_wanted_state_is_remembered_and_a_crash_reported_after_a_reboot(monkeypa
         return None
 
     hub = make_hub(monkeypatch, tmp_path, start=nothing, stop=nothing)
-    hub.container["gufo"] = "running"
+    hub.state["gufo"] = "running"
     hub._remember(now=100.0)
     assert hub.want["gufo"] == "running"
     # It dies by itself; the crash is seen live, then it stays down past the grace period.
-    hub.container["gufo"] = "exited"
+    hub.state["gufo"] = "exited"
     hub._crash["gufo"] = "gufo stopped unexpectedly"
     hub._remember(now=101.0)
     assert hub.want["gufo"] == "running", "not yet: a shutdown would look the same for these few seconds"
@@ -167,13 +171,13 @@ def test_restart_stops_then_starts_and_stays_wanted_running(monkeypatch, tmp_pat
 
     async def scenario():
         hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
-        hub.container["gufo"] = "running"
+        hub.state["gufo"] = "running"
         hub._remember(now=0.0)
         assert hub.want["gufo"] == "running"
         outcome = asyncio.create_task(hub.run_action("gufo", "restart"))
         await asyncio.sleep(0.01)
         assert hub.status("gufo") == "stopping"
-        hub.container["gufo"] = None          # the container is gone while the restart is between its halves
+        hub.state["gufo"] = None          # the container is gone while the restart is between its halves
         hub._remember(now=1.0)
         assert hub.want["gufo"] == "running", "a restart must not record the service as wanted stopped"
         gates["stop"].set()
@@ -195,11 +199,11 @@ def test_a_plain_stop_is_recorded_as_wanted_stopped(monkeypatch, tmp_path):
 
     async def scenario():
         hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
-        hub.container["gufo"] = "running"
+        hub.state["gufo"] = "running"
         hub._remember(now=0.0)
         hub.stop_service("gufo")
         await asyncio.sleep(0.01)
-        hub.container["gufo"] = None
+        hub.state["gufo"] = None
         hub._remember(now=1.0)
         gates["stop"].set()
         await asyncio.sleep(0.01)
@@ -258,7 +262,115 @@ def test_start_of_a_running_service_succeeds_without_acting(monkeypatch, tmp_pat
         events.append("stop")
 
     hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop)
-    hub.container["gufo"], hub.ready["gufo"], hub.ready_known["gufo"] = "running", True, True
+    hub.state["gufo"], hub.ready["gufo"], hub.ready_known["gufo"] = "running", True, True
     assert asyncio.run(hub.run_action("gufo", "start")) == ("running", "")
     assert events == []
     assert hub._crash["gufo"] == ""
+
+
+# --------------------------------------------------------------------------------
+# Services run as systemd units
+
+def test_autostart_brings_up_raven_server_before_raven_mcp(monkeypatch, tmp_path):
+    events = []
+
+    async def start(service, *, lan):
+        events.append(f"start {service.key}")
+        await asyncio.sleep(0.05)
+        events.append(f"ready {service.key}")
+
+    async def nothing(*args, **kwargs):
+        return None
+
+    async def scenario():
+        hub = make_hub(monkeypatch, tmp_path, start=start, stop=nothing, overrides=RAVEN)
+        monkeypatch.setattr(hub_module.services, "state", nothing)
+        monkeypatch.setattr(hub_module.access, "active_connections", lambda: [("uuid", [
+            hub_module.access.ipaddress.ip_interface("192.168.1.5/24")])])
+        hub.want = {"raven-mcp": "running", "raven-server": "running", "gufo": None, "openwebui": None}
+        await hub._autostart()
+
+    asyncio.run(scenario())
+    assert events == ["start raven-server", "ready raven-server", "start raven-mcp", "ready raven-mcp"]
+
+
+def test_a_service_started_outside_m97_is_not_stopped_nor_wanted_stopped(monkeypatch, tmp_path):
+    actions_seen = []
+
+    async def start(service, *, lan):
+        raise AssertionError("nothing should be started")
+
+    async def stop(service):
+        actions_seen.append(hub.action[service.key])
+        return f"{service.title} was started outside m97, so m97 does not stop it."
+
+    hub = make_hub(monkeypatch, tmp_path, start=start, stop=stop, overrides=RAVEN)
+    hub.state["raven-mcp"], hub.ready["raven-mcp"], hub.ready_known["raven-mcp"] = "outside", True, True
+    hub._remember(now=0.0)
+    assert hub.want["raven-mcp"] == "running", "seen running counts as wanted running, whoever started it"
+    status, error = asyncio.run(hub.run_action("raven-mcp", "stop"))
+    assert "started outside m97" in error
+    assert actions_seen == [None], "no stop was under way while it was refused"
+    assert status == "running"
+    hub._remember(now=100.0)
+    assert hub.want["raven-mcp"] == "running"
+
+
+def _unit_hub(monkeypatch, tmp_path, infos):
+    """A hub with the Raven units, whose systemd answers `infos` in turn: (ActiveState, Result) pairs."""
+    async def nothing(*args, **kwargs):
+        return None
+
+    answers = iter(infos)
+
+    async def unit_info(unit):
+        active, result = next(answers)
+        return {"ActiveState": active, "Result": result, "ExecMainStatus": "3"}
+
+    async def log_tail(service, lines):
+        return "OSError: boom"
+
+    hub = make_hub(monkeypatch, tmp_path, start=nothing, stop=nothing, overrides=RAVEN)
+    monkeypatch.setattr(hub_module.services, "unit_info", unit_info)
+    monkeypatch.setattr(hub_module.services, "log_tail", log_tail)
+    return hub
+
+
+def test_a_unit_that_fails_by_itself_is_reported(monkeypatch, tmp_path):
+    hub = _unit_hub(monkeypatch, tmp_path, [("active", "success"), ("active", "success"), ("failed", "exit-code")])
+    hub._listening["raven-mcp"] = True
+    asyncio.run(hub._refresh_unit("raven-mcp"))
+    assert hub.state["raven-mcp"] == "running" and hub.error["raven-mcp"] == ""
+    # The port closes; systemd still says active for a moment, then failed.
+    hub._listening["raven-mcp"] = False
+    asyncio.run(hub._refresh_unit("raven-mcp", settle=0))
+    assert hub.state["raven-mcp"] == "failed"
+    assert "raven-mcp stopped unexpectedly" in hub.error["raven-mcp"] and "(exit code 3)" in hub.error["raven-mcp"]
+    assert "journalctl --user -u m97-raven-mcp" in hub.error["raven-mcp"]
+    assert "OSError: boom" in hub._crash["raven-mcp"]
+
+
+def test_a_killed_unit_is_reported_without_an_exit_code(monkeypatch, tmp_path):
+    hub = _unit_hub(monkeypatch, tmp_path, [("active", "success"), ("failed", "signal")])
+    hub._listening["raven-mcp"] = True
+    asyncio.run(hub._refresh_unit("raven-mcp"))
+    hub._listening["raven-mcp"] = False
+    asyncio.run(hub._refresh_unit("raven-mcp", settle=0))
+    assert "(signal)" in hub.error["raven-mcp"] and "exit code" not in hub.error["raven-mcp"]
+
+
+def test_a_unit_found_failed_at_the_first_look_is_not_news(monkeypatch, tmp_path):
+    hub = _unit_hub(monkeypatch, tmp_path, [("failed", "exit-code")])
+    hub._listening["raven-mcp"] = False
+    asyncio.run(hub._refresh_unit("raven-mcp", settle=0))
+    assert hub.state["raven-mcp"] == "failed"
+    assert hub.error["raven-mcp"] == ""
+
+
+def test_a_unit_stopped_from_a_shell_is_not_a_crash(monkeypatch, tmp_path):
+    hub = _unit_hub(monkeypatch, tmp_path, [("active", "success"), ("inactive", "success")])
+    hub._listening["raven-mcp"] = True
+    asyncio.run(hub._refresh_unit("raven-mcp"))
+    hub._listening["raven-mcp"] = False
+    asyncio.run(hub._refresh_unit("raven-mcp", settle=0))
+    assert hub.state["raven-mcp"] is None and hub.error["raven-mcp"] == ""

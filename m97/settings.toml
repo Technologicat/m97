@@ -59,3 +59,22 @@ start_timeout = 300
 #             "~/Documents/koodit/substrate-independent:/home/me/Documents/koodit/substrate-independent",
 #             "~/.config/raven/librarian/lorebook_expansion:/lorebook_expansion"]
 mounts = []
+
+# Raven (https://github.com/Technologicat/raven), optional: its server, and its MCP server, which offers
+# Raven's web search, page fetch and lorebook to LLM frontends, Open WebUI among them. Each is a program in
+# Raven's venv, run as the transient systemd user unit `unit`, not in a container. Off while `command` is
+# empty, which leaves it off the page too. On a trusted network each serves the LAN (`--listen`), like
+# the containers; `extra_args` are appended to its command line.
+[raven-server]
+command = ""                 # e.g. "~/Documents/koodit/raven/.venv/bin/raven-server"
+unit = "m97-raven-server"
+port = 5100
+extra_args = []
+start_timeout = 300          # seconds
+
+[raven-mcp]
+command = ""                 # e.g. "~/Documents/koodit/raven/.venv/bin/raven-mcp"
+unit = "m97-raven-mcp"
+port = 8130                  # serves at http://<host>:<port>/mcp; pointed at Raven-server above if that is set
+extra_args = []
+start_timeout = 60

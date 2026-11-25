@@ -288,9 +288,8 @@ def build(hub):
                 background, foreground = STATUS_COLORS[status]
                 badge.style(f"background: {background} !important; color: {foreground} !important")
                 spinner.visible = status in ("starting", "stopping")
-                state = hub.container[key]
-                detail.text = hub.note[key] or (f"container: {state}" if state not in (None, "running") else "")
                 service, where = hub.services[key], hub.scope[key]
+                detail.text = hub.note[key] or services.state_note(service, hub.state[key])
                 url = services.service_url(service, where) or ""
                 address.text = url
                 address.props(f'href="{url}"')

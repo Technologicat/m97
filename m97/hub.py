@@ -2,7 +2,8 @@
 
 A single set of background tasks keeps it current: the sensor sampler, gufo's HTTP endpoints (polled only
 while its container runs), gufo's log (for the recent requests), and podman's container events. The sampler
-also keeps the per-day usage tally (see `usage`). Pages only
+also keeps the per-day usage tally (see `usage`), and watches the ports of the services run as systemd
+units, asking systemd about a unit when its port opens or closes. Pages only
 read from it, so a second open tab costs a render, not a second round of sampling.
 """
 
@@ -42,8 +43,8 @@ class Hub:
 
     def __init__(self, settings, *, state_path=None, usage_path=None):
         self.settings = settings
-        self.services = {s.key: s for s in (services.gufo_service(settings), services.openwebui_service(settings))}
-        self._by_container = {s.container: s.key for s in self.services.values()}
+        self.services = {s.key: s for s in services.configured_services(settings)}
+        self._by_container = {s.container: s.key for s in self.services.values() if s.container}
         self._sample = sensors.make_sampler()
         self.cpu_cores = sensors.cpu_cores()   # CPU numbers grouped by physical core
 
@@ -53,7 +54,11 @@ class Hub:
         self.history = collections.deque(maxlen=length)   # (monotonic time, {series: value})
         self.latest = {}                                  # the newest sensor sample
 
-        self.container = {key: None for key in self.services}   # container state per service
+        self.state = {key: None for key in self.services}       # per service, see `services.state`
+        # For a unit service, the unit's `ActiveState` as last asked, and whether its port was open at the last
+        # sample (`None` before the first), so that systemd is asked only when that changes.
+        self._unit_active = {key: None for key, s in self.services.items() if s.unit}
+        self._listening = {key: None for key in self._unit_active}
         self.ready = {key: False for key in self.services}
         self.ready_known = {key: False for key in self.services}   # `ready` checked since the container started
         self.scope = {key: None for key in self.services}       # "all", "local" or None: where it listens
@@ -102,7 +107,8 @@ class Hub:
         try:
             self.control_token = access.write_token(path)
         except OSError as exc:
-            logger.warning(f"{path}: could not write the token, so `m97 gufo` and `m97 openwebui` will be refused: {exc}")
+            logger.warning(f"{path}: could not write the token, so `m97 gufo`, `m97 openwebui` and the like will be "
+                           f"refused: {exc}")
         self._tasks = [asyncio.create_task(self._sampling_loop()),
                        asyncio.create_task(services.follow_events(list(self._by_container), self._on_container)),
                        asyncio.create_task(self._network_loop())]
@@ -121,7 +127,7 @@ class Hub:
 
     def status(self, key):
         """`starting`, `stopping`, `running`, `stopped` or `unknown`; see `services.derive_status`."""
-        return services.derive_status(container=self.container[key], ready=self.ready[key], action=self.action[key],
+        return services.derive_status(state=self.state[key], ready=self.ready[key], action=self.action[key],
                                       ready_known=self.ready_known[key])
 
     async def decision(self):
@@ -194,6 +200,10 @@ class Hub:
 
     async def _act(self, key, verb):
         service = self.services[key]
+        if verb == "stop" and self.state[key] == "outside":
+            # `services.stop` refuses this one, and with no stop under way, nothing records it as wanted stopped.
+            self.error[key] = await services.stop(service) or ""
+            return
         self.action[key], self.error[key] = verb, ""
         error = None
         try:
@@ -204,6 +214,10 @@ class Hub:
                 error = await services.start(service, lan=trusted.allowed)
             else:
                 error = await services.stop(service)
+            if service.unit:
+                # Before `action` is cleared: no event says a unit changed, and until this is read, the state
+                # would be computed from the unit's state before the action.
+                await self._refresh_unit(key)
         except asyncio.CancelledError:
             raise  # a stop took over; it clears `action` itself
         except Exception as exc:  # the page must hear about it, whatever it was
@@ -224,7 +238,7 @@ class Hub:
         key = self._by_container.get(name)
         if key is None:
             return
-        self.container[key] = state
+        self.state[key] = state
         if state != "running":
             self.ready[key] = self.ready_known[key] = False
         if key == "gufo":
@@ -233,25 +247,51 @@ class Hub:
             asyncio.create_task(self._check_crash(key, event.get("ContainerExitCode")))
 
     async def _check_crash(self, key, maybe_exit_code, *, settle=10.0):
-        """Report a service that died by itself, as opposed to being stopped.
+        """Report a container that died by itself, as opposed to being stopped.
 
         A deliberate stop, by m97 or by a shell script, removes the container within a second or so of its
         death; a crash leaves it behind, exited. So wait a little, then look.
         """
         await asyncio.sleep(settle)
-        service = self.services[key]
-        state = await services.container_state(service.container)
+        state = await services.container_state(self.services[key].container)
         if state is None or state == "running" or self.action[key] is not None:
             return
-        _, out, err = await services.run("podman", "logs", "--tail", "15", service.container)
+        await self._report_crash(key, None if maybe_exit_code is None else f"exit code {maybe_exit_code}")
+
+    async def _refresh_unit(self, key, *, settle=2.0):
+        """Ask systemd for a unit service's state, and report a crash if the unit has just failed by itself.
+
+        Called when the service's port opens or closes, at m97's start, and after m97 starts or stops it.
+        A deliberate stop leaves the unit inactive (m97 resets one that failed while stopping); a crash leaves
+        it failed.
+        """
+        service = self.services[key]
+        info = await services.unit_info(service.unit)
+        if info["ActiveState"] in ("active", "deactivating") and not self._listening[key]:
+            # The port closes a moment before systemd has seen the process exit.
+            await asyncio.sleep(settle)
+            info = await services.unit_info(service.unit)
+        was, self._unit_active[key] = self._unit_active[key], info["ActiveState"]
+        self.state[key] = services.unit_status(info["ActiveState"], listening=bool(self._listening[key]))
+        # `was` is `None` at the first look, and a unit that failed while m97 was not running is not news.
+        if info["ActiveState"] == "failed" and was not in (None, "failed") and self.action[key] is None:
+            # `ExecMainStatus` is the exit code only when the process exited; killed, it is the signal.
+            how = (f"exit code {info['ExecMainStatus']}" if info["Result"] == "exit-code"
+                   else info["Result"] or None)
+            await self._report_crash(key, how)
+
+    async def _report_crash(self, key, maybe_how):
+        """Keep and show a crash report: `maybe_how` is a few words on how it ended, such as an exit code."""
+        service = self.services[key]
+        tail = await services.log_tail(service, 15)
         when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        code = f" (exit code {maybe_exit_code})" if maybe_exit_code is not None else ""
+        code = f" ({maybe_how})" if maybe_how else ""
         # A blank line separates what to read from the details; the page folds the details away.
         message = (f"{service.title} stopped unexpectedly at {when}{code}. m97 does not restart it by itself, "
                    f"and will not start it at boot until it has run again. Press Start to try again; if it keeps "
-                   f"stopping, `podman logs {service.container}` on the server has the whole log.\n\n"
-                   f"Its last log lines:\n{(out + err).strip()}")
-        logger.warning(f"{service.container}: stopped unexpectedly{code}")
+                   f"stopping, `{services.log_hint(service)}` on the server has the whole log.\n\n"
+                   f"Its last log lines:\n{tail}")
+        logger.warning(f"{service.key}: stopped unexpectedly{code}")
         self._crash[key] = message
         self.error[key] = message
 
@@ -262,7 +302,7 @@ class Hub:
             action = ("start" if key in self._restarting or key in self._autostart_pending
                       else self.action[key])
             want, self._down_since[key] = intent.track(self.want[key], self._down_since[key],
-                                                       running=self.container[key] == "running",
+                                                       running=self.state[key] in ("running", "outside"),
                                                        action=action, now=now)
             if want == self.want[key]:
                 continue
@@ -298,21 +338,29 @@ class Hub:
             await asyncio.sleep(poll)
         else:
             logger.warning(f"no network after {network_timeout:.0f} s; starting anyway")
-        # gufo first, and the rest once its start has finished: Open WebUI is a front end to it.
-        for key in sorted(targets, key=lambda k: k != "gufo"):
-            if await services.container_state(self.services[key].container) == "running":
+        # A service whose `after` names another being started waits until that start has finished: Open WebUI
+        # is a front end to gufo, and raven-mcp a front end to Raven-server.
+        started = {}
+
+        async def bring_up(key):
+            before = [other for other in self.services[key].after if other in started]
+            if before:
+                self.note[key] = f"autostart: waiting for {', '.join(self.services[k].title for k in before)}"
+                await asyncio.gather(*(started[k] for k in before), return_exceptions=True)
+            if await services.state(self.services[key]) in ("running", "outside"):
                 self._autostart_pending.discard(key)
                 self.note[key] = ""
-                continue
+                return
             logger.info(f"{key}: was running when m97 last ran; starting it")
             self.note[key] = "autostart"
-            self.start_service(key)
+            task = self.start_service(key)
             self._autostart_pending.discard(key)
-            if key == "gufo" and len(targets) > 1:
-                for other in targets:
-                    if other != key:
-                        self.note[other] = "autostart: waiting for gufo"
-                await asyncio.gather(self._action_tasks[key], return_exceptions=True)
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
+
+        for key in targets:
+            started[key] = asyncio.create_task(bring_up(key))
+        await asyncio.gather(*started.values(), return_exceptions=True)
 
     def _follow_gufo_log(self, running):
         if running and (self._log_task is None or self._log_task.done()):
@@ -372,17 +420,27 @@ class Hub:
         now = time.monotonic()
         self.latest = await asyncio.to_thread(self._sample)
         for key, service in self.services.items():
-            self.scope[key] = (await asyncio.to_thread(services.listen_scope, service.port)
-                               if self.container[key] == "running" else None)
-            if self.container[key] == "running":
+            if service.unit:
+                # A unit's port is read every sample, since its opening and closing are the only events there
+                # are: systemd signals only clients that have subscribed over D-Bus.
+                self.scope[key] = await asyncio.to_thread(services.listen_scope, service.port)
+                listening = self.scope[key] is not None
+                if listening != self._listening[key]:
+                    self._listening[key] = listening
+                    await self._refresh_unit(key)
+                self.state[key] = services.unit_status(self._unit_active[key], listening=listening)
+            else:
+                self.scope[key] = (await asyncio.to_thread(services.listen_scope, service.port)
+                                   if self.state[key] == "running" else None)
+            if self.state[key] in ("running", "outside"):
                 if key == "gufo":
                     await self._poll_gufo(now)
                 else:
-                    self.ready[key] = await asyncio.to_thread(services.answers, service.ready_url)
+                    self.ready[key] = await asyncio.to_thread(services.is_ready, service)
                 self.ready_known[key] = True
             else:
-                self.ready[key] = False
-        if self.container["gufo"] != "running" or not self.ready["gufo"]:
+                self.ready[key] = self.ready_known[key] = False
+        if self.state["gufo"] != "running" or not self.ready["gufo"]:
             self.slots, self.metrics, self.gen_tps, self._previous_tokens = [], {}, None, None
             self._previous_slots = {}
         self._remember(now)
@@ -395,7 +453,7 @@ class Hub:
     def _count_usage(self, now, *, save_every=60.0):
         """Add the time since the previous sample to today's tally, and save the tally once a minute."""
         if self._usage_t is not None:
-            what = usage.category(container=self.container["gufo"], ready=self.ready["gufo"],
+            what = usage.category(container=self.state["gufo"], ready=self.ready["gufo"],
                                   ready_known=self.ready_known["gufo"], slots=self.slots)
             date = datetime.date.today().isoformat()
             self.usage[date] = usage.account(self.usage.get(date), category=what, interval=now - self._usage_t,
